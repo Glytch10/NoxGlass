@@ -12,7 +12,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
@@ -40,7 +39,7 @@ public final class ChannelManagerPersistence extends SavedData {
     public static final int MAX_CHANNELS = 256;
     public static final String DEFAULT_CHANNEL = "Default";
     public static final SavedDataType<ChannelManagerPersistence> TYPE = new SavedDataType<>(Identifier.withDefaultNamespace("glass_channels"), ChannelManagerPersistence::new, CompoundTag.CODEC.xmap(tag -> gather(tag, null), data -> data.save(new CompoundTag(), null)), null);
-    private static final SavedDataType<LegacyChannelData> LEGACY_TYPE = new SavedDataType<>(Identifier.withDefaultNamespace("glass_channels"), LegacyChannelData::new, CompoundTag.CODEC.xmap(tag -> LegacyChannelData.gather(tag, null), data -> data.save(new CompoundTag(), null)), null);
+    private static final SavedDataType<LegacyChannelData> LEGACY_TYPE = new SavedDataType<>(Identifier.withDefaultNamespace("glass_channels"), LegacyChannelData::new, CompoundTag.CODEC.xmap(tag -> LegacyChannelData.gather(tag), data -> data.save(new CompoundTag(), null)), null);
 
     private final Map<String, Channel> channels = new LinkedHashMap<>();
     private final Map<String, PendingLink> pendingLinks = new LinkedHashMap<>();
@@ -517,7 +516,7 @@ public final class ChannelManagerPersistence extends SavedData {
             return tag;
         }
 
-        private static LegacyChannelData gather(CompoundTag tag, HolderLookup.Provider registryLookup) {
+        private static LegacyChannelData gather(CompoundTag tag) {
             List<LegacyEntry> entries = new ArrayList<>();
             ListTag channels = tag.getListOrEmpty("channels");
             int count = Math.min(channels.size(), MAX_CHANNELS);

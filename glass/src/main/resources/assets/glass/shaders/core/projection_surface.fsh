@@ -1,9 +1,14 @@
 #version 330
 
+#moj_import <minecraft:globals.glsl>
+#moj_import <minecraft:matrix.glsl>
+
 uniform sampler2D Projection0;
 uniform sampler2D Projection1;
 uniform sampler2D Projection2;
 uniform sampler2D Projection3;
+uniform sampler2D PortalSky;
+uniform sampler2D PortalLayers;
 layout(std140) uniform SurfaceParameters {
     vec4 RevealProgress;
     vec4 ProjectionChannels;
@@ -20,7 +25,7 @@ flat in vec4 projectionMask;
 
 out vec4 fragColor;
 
-vec3 projectionColor(int index) {
+vec3 projectionSample(int index) {
     if (index == 0) {
         return texture(Projection0, screenUv).rgb;
     }
@@ -31,6 +36,80 @@ vec3 projectionColor(int index) {
         return texture(Projection2, screenUv).rgb;
     }
     return texture(Projection3, screenUv).rgb;
+}
+
+float staticHash(vec2 cell, float frame) {
+    uvec3 v = uvec3(ivec3(int(cell.x), int(cell.y), int(frame))) * 1664525u + 1013904223u;
+    v.x += v.y * v.z;
+    v.y += v.z * v.x;
+    v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    return float(v.x & 65535u) / 65535.0;
+}
+
+const int PORTAL_LAYERS = 15;
+const vec3[] PORTAL_COLORS = vec3[](
+    vec3(0.022087, 0.098399, 0.110818),
+    vec3(0.011892, 0.095924, 0.089485),
+    vec3(0.027636, 0.101689, 0.100326),
+    vec3(0.046564, 0.109883, 0.114838),
+    vec3(0.064901, 0.117696, 0.097189),
+    vec3(0.063761, 0.086895, 0.123646),
+    vec3(0.084817, 0.111994, 0.166380),
+    vec3(0.097489, 0.154120, 0.091064),
+    vec3(0.106152, 0.131144, 0.195191),
+    vec3(0.097721, 0.110188, 0.187229),
+    vec3(0.133516, 0.138278, 0.148582),
+    vec3(0.070006, 0.243332, 0.235792),
+    vec3(0.196766, 0.142899, 0.214696),
+    vec3(0.047281, 0.315338, 0.321970),
+    vec3(0.204675, 0.390010, 0.302066),
+    vec3(0.080955, 0.314821, 0.661491)
+);
+
+const mat4 PORTAL_SCALE_TRANSLATE = mat4(
+    0.5, 0.0, 0.0, 0.25,
+    0.0, 0.5, 0.0, 0.25,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+);
+
+mat4 portalLayer(float layer) {
+    mat4 translate = mat4(
+        1.0, 0.0, 0.0, 17.0 / layer,
+        0.0, 1.0, 0.0, (2.0 + layer / 1.5) * (GameTime * 1.5),
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0
+    );
+    mat2 rotate = mat2_rotate_z(radians((layer * layer * 4321.0 + layer * 9.0) * 2.0));
+    mat2 scale = mat2((4.5 - layer / 4.0) * 2.0);
+    return mat4(scale * rotate) * translate * PORTAL_SCALE_TRANSLATE;
+}
+
+vec3 staticNoise() {
+    float time = GameTime * 1200.0;
+    float frame = floor(time * 24.0);
+    vec2 pixel = gl_FragCoord.xy;
+    float row = floor(pixel.y / 3.0);
+    float tear = staticHash(vec2(0.0, row), frame) > 0.94 ? 0.04 : 0.004;
+    vec2 uv = screenUv + vec2((staticHash(vec2(1.0, row), frame) - 0.5) * tear, 0.0);
+    vec3 color = texture(PortalSky, uv).rgb * PORTAL_COLORS[0];
+    for (int i = 0; i < PORTAL_LAYERS; i++) {
+        vec4 layerUv = vec4(uv, 0.0, 1.0) * portalLayer(float(i + 1));
+        color += texture(PortalLayers, layerUv.xy / layerUv.w).rgb * PORTAL_COLORS[i];
+    }
+    float grain = staticHash(floor(pixel / 2.0), frame);
+    float scanline = 0.75 + 0.25 * sin(pixel.y * 1.5);
+    float band = 1.0 - smoothstep(0.0, 0.08, abs(fract(pixel.y / 720.0 - time * 0.25) - 0.5));
+    color = color * scanline * (0.6 + 0.8 * grain) + vec3(0.05, 0.16, 0.18) * (band * 0.6 + grain * 0.08);
+    return clamp(color, 0.0, 1.0);
+}
+
+vec3 projectionColor(int index) {
+    vec3 projection = projectionSample(index);
+    float staticAmount = ProjectorPositions[index].w;
+    return staticAmount > 0.0 ? mix(projection, staticNoise(), staticAmount) : projection;
 }
 
 void main() {

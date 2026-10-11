@@ -7,7 +7,6 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public final class ProjectionCamera extends Camera {
-    private static final float NEAR_DISTANCE = 0.05F;
     private final Matrix4f projection = new Matrix4f();
     public void setPose(Vec3 position, Quaternionf pose) {
         Quaternionf normalizedPose = new Quaternionf(pose).normalize();

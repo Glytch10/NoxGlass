@@ -4,10 +4,6 @@ import com.mojang.blaze3d.GpuFormat;
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.pipeline.TextureTarget;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
-import com.mojang.blaze3d.vertex.MeshData;
-import com.mojang.blaze3d.vertex.VertexSorting;
-import com.mojang.blaze3d.vertex.PoseStack;
 import dev.imb11.client.compat.IrisCompatibility;
 import dev.imb11.client.remote.RemoteSceneClientManager;
 import dev.imb11.debug.FeedDiagnostics;
@@ -23,18 +19,15 @@ import dev.imb11.projection.ProjectionChunkRegion;
 import dev.imb11.sync.ProjectionSource;
 import dev.imb11.sync.remote.RemoteSubscriptionId;
 import net.minecraft.client.Camera;
-import net.minecraft.client.CloudStatus;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
-import dev.imb11.client.renderer.projection.ProjectionLightmap;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.SectionBufferBuilderPool;
 import net.minecraft.client.renderer.ViewArea;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.client.renderer.chunk.SectionMesh;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import net.minecraft.client.renderer.chunk.RenderRegionCache;
@@ -46,12 +39,11 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.SectionPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.packs.resources.ResourceManager;
-import net.minecraft.util.Mth;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
@@ -63,7 +55,6 @@ import org.joml.Vector4f;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.function.Predicate;
 import java.util.Collections;
@@ -86,12 +77,13 @@ public final class ProjectionRenderManager {
     private static final int STRANDED_BUILD_FRAMES = 10;
     private static final int FEED_BUILD_BUFFERS = Math.min(4, Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
     private static final long BUILD_PREPARATION_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
-    private static final long UPLOAD_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
     private static final long HELD_FRAME_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5L);
     private static final float CAMERA_FACE_OFFSET = 0.5625F;
     private static final double PORTAL_MAPPING_OFFSET = 0.5D;
     private static final float PORTAL_CLIP_MIN_DISTANCE = 0.05F;
     private static final double GRID_RECENTER_DISTANCE = 16.0D;
+    private static final float VIEW_BLOCK_MARGIN = 1.25F;
+    private static final long STATIC_FADE_NANOS = TimeUnit.MILLISECONDS.toNanos(120L);
     private static final Map<FeedKey, ProjectionFeed> FEEDS = new LinkedHashMap<>();
     private static final Map<TerrainKey, TerrainResources> TERRAINS = new HashMap<>();
     private static final Map<ProjectionOwner, PortalSide> PORTAL_SIDES = new HashMap<>();
@@ -102,7 +94,6 @@ public final class ProjectionRenderManager {
     private static long textureSequence;
     private static long subscriptionSequence;
     private static long buildPreparationNanos;
-    private static long uploadNanos;
 
     private ProjectionRenderManager() {
     }
@@ -407,7 +398,6 @@ public final class ProjectionRenderManager {
         RenderSystem.assertOnRenderThread();
         frameSequence++;
         buildPreparationNanos = 0L;
-        uploadNanos = 0L;
 
         Minecraft minecraft = Minecraft.getInstance();
         ClientLevel currentLevel = minecraft.level;
@@ -426,7 +416,6 @@ public final class ProjectionRenderManager {
             channelScreen.preparePreview();
         }
         RenderTarget mainTarget = gameRenderer.mainRenderTarget();
-        float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
         Camera viewerCamera = gameRenderer.mainCamera();
         Vec3 viewerPosition = viewerCamera.position();
         Matrix4f mainProjection = new Matrix4f(gameRenderer.gameRenderState().levelRenderState.cameraRenderState.projectionMatrix);
@@ -463,7 +452,7 @@ public final class ProjectionRenderManager {
 
             if (IrisCompatibility.isShaderPackActive()) {
                 feed.stage = ProjectionStage.SHADER_PACK_ACTIVE;
-                markUnavailable(feed, mainTarget);
+                markUnavailable(feed);
                 continue;
             }
 
@@ -486,10 +475,11 @@ public final class ProjectionRenderManager {
                 if (sceneLevel == null || grantedRadius < 1 || remoteScene.isUnavailable()
                         || (!feed.ready && !remoteScene.isReady(cameraCenter))) {
                     feed.stage = remoteLevel == null || grantedRadius < 1 ? ProjectionStage.WAITING_FOR_GRANT : ProjectionStage.WAITING_FOR_CAMERA_CHUNKS;
-                    markUnavailable(feed, mainTarget);
+                    markUnavailable(feed);
                     continue;
                 }
-                applyCamera(feed.camera, sceneLevel, minecraft, portalView, partialTick);
+                applyCamera(feed.camera, sceneLevel, minecraft, portalView);
+                updateStatic(feed, sceneLevel, portalView);
                 boolean requiresInitialization = requiresResourceInitialization(feed, sceneLevel, grantedRadius);
                 if (requiresInitialization && initializedFeedThisFrame) {
                     feed.stage = ProjectionStage.WAITING_FOR_RENDERER_SLOT;
@@ -520,7 +510,7 @@ public final class ProjectionRenderManager {
                     continue;
                 }
                 long drawStart = System.nanoTime();
-                renderFeed(minecraft, deltaTracker, feed, portalView);
+                renderFeed(deltaTracker, feed, portalView);
                 reportSlowStage(feed, "draw", drawStart);
                 feed.stage = feed.ready ? (feed.terrainReadyFrames < 2 ? ProjectionStage.REFRESHING_TERRAIN : ProjectionStage.READY) : ProjectionStage.WAITING_FOR_TERRAIN;
             } catch (RuntimeException exception) {
@@ -536,10 +526,10 @@ public final class ProjectionRenderManager {
                 feed.stage = ProjectionStage.RENDER_FAILED;
                 feed.nextRetryFrame = frameSequence + FAILURE_RETRY_FRAMES;
             } finally {
-                restoreMainRenderState(mainTarget, gameRenderer, mainProjection, mainModelView);
+                restoreMainRenderState(mainModelView);
             }
         }
-        restoreMainRenderState(mainTarget, gameRenderer, mainProjection, mainModelView);
+        restoreMainRenderState(mainModelView);
         ProjectorBlockEntityRenderer.prepareSurfaceBlending(currentLevel);
     }
 
@@ -867,13 +857,11 @@ public final class ProjectionRenderManager {
     }
 
     private static void uploadTerrain(SectionRenderDispatcher dispatcher) {
-        long started = System.nanoTime();
         dispatcher.lock();
         try {
             dispatcher.uploadTerrainBuffersToGpu();
         } finally {
             dispatcher.unlock();
-            uploadNanos += System.nanoTime() - started;
         }
     }
 
@@ -903,7 +891,7 @@ public final class ProjectionRenderManager {
         return true;
     }
 
-    private static void renderFeed(Minecraft minecraft, DeltaTracker deltaTracker, ProjectionFeed feed, PortalView portalView) {
+    private static void renderFeed(DeltaTracker deltaTracker, ProjectionFeed feed, PortalView portalView) {
         if (feed.holdingFrameSinceNanos >= 0L && feed.terrainReadyFrames < 2
                 && System.nanoTime() - feed.holdingFrameSinceNanos > HELD_FRAME_TIMEOUT_NANOS) {
             feed.holdingFrameSinceNanos = -1L;
@@ -925,10 +913,6 @@ public final class ProjectionRenderManager {
         }
     }
 
-
-
-
-
     private static PortalView configurePortalCamera(
             ProjectionFeed feed,
             Camera viewerCamera,
@@ -947,7 +931,7 @@ public final class ProjectionRenderManager {
                     .rotateX((float) Math.toRadians(-10));
             Matrix4f projection = new Matrix4f().perspective((float) Math.toRadians(85), feed.previewAspect, 1024.0F, 0.05F,
                     RenderSystem.getDevice().getDeviceInfo().isZZeroToOne());
-            PortalView preview = new PortalView(position, rotation, projection, projection, 512, Math.max(1, (int) (512 / feed.previewAspect)));
+            PortalView preview = new PortalView(position, rotation, projection, projection, 512, Math.max(1, (int) (512 / feed.previewAspect)), false);
             feed.camera.setPose(position, rotation);
             feed.camera.setProjection(projection);
             feed.cameraPosition = position;
@@ -988,13 +972,17 @@ public final class ProjectionRenderManager {
                 .add(destinationUp.scale(verticalOffset))
                 .add(destinationBack.scale(normalOffset));
         TargetSize targetSize = targetSize(mainTarget);
+        Matrix4f projection = planar
+                ? clipToPlane(mainProjection, cameraRotation, dynamicPosition, destinationAnchor, destinationLook)
+                : mainProjection;
         PortalView portalView = new PortalView(
                 dynamicPosition,
                 cameraRotation,
-                planar ? clipToPlane(mainProjection, cameraRotation, dynamicPosition, destinationAnchor, destinationLook) : mainProjection,
+                projection,
                 mainProjection,
                 targetSize.width(),
-                targetSize.height()
+                targetSize.height(),
+                projection != mainProjection
         );
         feed.camera.setPose(portalView.cameraPosition(), portalView.cameraRotation());
         feed.camera.setProjection(portalView.projection());
@@ -1033,8 +1021,7 @@ public final class ProjectionRenderManager {
             ProjectionCamera camera,
             ClientLevel level,
             Minecraft minecraft,
-            PortalView portalView,
-            float partialTick
+            PortalView portalView
     ) {
         camera.setLevel(level);
         camera.attributeProbe().tick(level, portalView.cameraPosition());
@@ -1049,6 +1036,47 @@ public final class ProjectionRenderManager {
                 (float) up.x, (float) up.y, (float) up.z,
                 (float) back.x, (float) back.y, (float) back.z
         ));
+    }
+
+    private static void updateStatic(ProjectionFeed feed, ClientLevel level, PortalView portalView) {
+        long now = System.nanoTime();
+        float target = feed.previewAspect <= 0 && !portalView.clipped() && viewBlocked(level, portalView) ? 1.0F : 0.0F;
+        float step = feed.staticUpdatedNanos < 0L ? 1.0F : (float) (now - feed.staticUpdatedNanos) / STATIC_FADE_NANOS;
+        feed.staticUpdatedNanos = now;
+        feed.staticAmount = target > feed.staticAmount
+                ? Math.min(target, feed.staticAmount + step)
+                : Math.max(target, feed.staticAmount - step);
+    }
+
+    private static boolean viewBlocked(ClientLevel level, PortalView portalView) {
+        Matrix4f projection = portalView.projection();
+        float halfWidth = Camera.PROJECTION_Z_NEAR * VIEW_BLOCK_MARGIN / Math.abs(projection.m00());
+        float halfHeight = Camera.PROJECTION_Z_NEAR * VIEW_BLOCK_MARGIN / Math.abs(projection.m11());
+        Vec3 camera = portalView.cameraPosition();
+        Vector3f offset = new Vector3f();
+        BlockPos.MutableBlockPos pos = new BlockPos.MutableBlockPos();
+        for (int point = 0; point < 5; point++) {
+            float x = point == 4 ? 0.0F : (point & 1) == 0 ? -halfWidth : halfWidth;
+            float y = point == 4 ? 0.0F : (point & 2) == 0 ? -halfHeight : halfHeight;
+            offset.set(x, y, -Camera.PROJECTION_Z_NEAR).rotate(portalView.cameraRotation());
+            pos.set(camera.x + offset.x, camera.y + offset.y, camera.z + offset.z);
+            if (blocksView(level, pos)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean blocksView(ClientLevel level, BlockPos pos) {
+        if (level.isOutsideBuildHeight(pos.getY())) {
+            return false;
+        }
+        if (level.getChunkSource().getChunk(SectionPos.blockToSectionCoord(pos.getX()),
+                SectionPos.blockToSectionCoord(pos.getZ()), ChunkStatus.FULL, false) == null) {
+            return true;
+        }
+        BlockState state = level.getBlockState(pos);
+        return state.getRenderShape() != RenderShape.INVISIBLE && state.isViewBlocking(level, pos);
     }
 
     private static Vec3 directionVector(Direction direction) {
@@ -1076,7 +1104,7 @@ public final class ProjectionRenderManager {
         feed.ready = false;
     }
 
-    private static void markUnavailable(ProjectionFeed feed, RenderTarget mainTarget) {
+    private static void markUnavailable(ProjectionFeed feed) {
         boolean clear = feed.ready || feed.available;
         feed.ready = false;
         feed.available = false;
@@ -1086,19 +1114,12 @@ public final class ProjectionRenderManager {
         }
     }
 
-
-
-
-
-    private static void restoreMainRenderState(RenderTarget mainTarget, GameRenderer gameRenderer,
-                                                Matrix4f mainProjection, Matrix4f mainModelView) {
+    private static void restoreMainRenderState(Matrix4f mainModelView) {
         if (ProjectionRenderContext.isActive()) {
             throw new IllegalStateException("Projection render context escaped its scope");
         }
         RenderSystem.getModelViewStack().set(mainModelView);
     }
-
-
 
     private static void closeFeed(ProjectionFeed feed) {
         long started = System.nanoTime();
@@ -1152,15 +1173,9 @@ public final class ProjectionRenderManager {
         if (terrain.renderer != null) {
             cleanup(feed, "renderer level", () -> terrain.renderer.setLevel(null));
             cleanup(feed, "level renderer", terrain.renderer::close);
-            ClientLevel currentLevel = Minecraft.getInstance().level;
-            if (currentLevel != null) {
-            }
         }
         if (terrain.buffers != null) {
             cleanup(feed, "render buffers", () -> retireRenderBuffers(terrain.buffers, terrain.bufferCount));
-        }
-        if (terrain.sortBuffer != null) {
-            cleanup(feed, "transparency sort buffer", terrain.sortBuffer::close);
         }
     }
 
@@ -1213,7 +1228,6 @@ public final class ProjectionRenderManager {
         private ProjectionLevelRenderer renderer;
         private RenderBuffers buffers;
         private ProjectionLightmap lightTexture;
-        private ByteBufferBuilder sortBuffer;
         private int bufferCount;
         private int references;
         private final long createdNanos = System.nanoTime();
@@ -1262,7 +1276,8 @@ public final class ProjectionRenderManager {
             Matrix4f projection,
             Matrix4f skyProjection,
             int targetWidth,
-            int targetHeight
+            int targetHeight,
+            boolean clipped
     ) {
         private PortalView {
             cameraRotation = new Quaternionf(cameraRotation);
@@ -1302,6 +1317,8 @@ public final class ProjectionRenderManager {
         private ProjectionStage stage = ProjectionStage.REQUESTED;
         private boolean ready;
         private float previewAspect;
+        private float staticAmount;
+        private long staticUpdatedNanos = -1L;
         private final long previewStartedNanos = System.nanoTime();
         private int terrainReadyFrames;
         private long holdingFrameSinceNanos = -1L;
@@ -1374,6 +1391,10 @@ public final class ProjectionRenderManager {
 
         public boolean isReady() {
             return ProjectionRenderManager.isReady(this);
+        }
+
+        public float staticAmount() {
+            return staticAmount;
         }
 
         public boolean isFailed() {

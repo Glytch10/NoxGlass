@@ -8,12 +8,10 @@ import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.dimension.DimensionType;
 
-import java.util.function.Supplier;
 
 final class RemoteSceneLevel extends ClientLevel {
     RemoteSceneLevel(ClientPacketListener connection, ClientLevelData data, ResourceKey<Level> dimension,

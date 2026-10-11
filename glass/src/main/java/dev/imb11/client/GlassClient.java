@@ -12,7 +12,6 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 
-import java.io.IOException;
 
 public final class GlassClient {
     private static volatile ClientLevel activeLevel;

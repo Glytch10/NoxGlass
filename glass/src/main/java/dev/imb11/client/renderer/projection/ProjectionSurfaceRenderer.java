@@ -25,6 +25,10 @@ import com.mojang.blaze3d.shaders.UniformType;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureManager;
+import net.minecraft.client.renderer.blockentity.AbstractEndPortalRenderer;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import org.lwjgl.system.MemoryStack;
 
 import java.util.ArrayList;
@@ -43,6 +47,8 @@ public final class ProjectionSurfaceRenderer {
     private static final int DISTANCE_RADIX = 4096;
     private static final float CROSSFADE_WIDTH = 4.0F;
     private static final String[] PROJECTION_SAMPLERS = {"Projection0", "Projection1", "Projection2", "Projection3"};
+    private static final String PORTAL_SKY_SAMPLER = "PortalSky";
+    private static final String PORTAL_LAYERS_SAMPLER = "PortalLayers";
     private static final Identifier SHADER_LOCATION =
             Identifier.fromNamespaceAndPath("glass", "core/projection_surface");
     private static final Map<ClientLevel, Map<BlockPos, CachedMesh>> CACHED_MESHES = new IdentityHashMap<>();
@@ -65,12 +71,14 @@ public final class ProjectionSurfaceRenderer {
                 .withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
                 .withPrimitiveTopology(PrimitiveTopology.QUADS)
                 .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
+                .withBindGroupLayout(BindGroupLayouts.GLOBALS)
                 .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, !loading))
                 .withCull(false);
         var surfaceLayout = BindGroupLayout.builder().withUniform("SurfaceParameters", UniformType.UNIFORM_BUFFER);
         for (String sampler : PROJECTION_SAMPLERS) {
             surfaceLayout.withSampler(sampler);
         }
+        surfaceLayout.withSampler(PORTAL_SKY_SAMPLER).withSampler(PORTAL_LAYERS_SAMPLER);
         builder.withBindGroupLayout(surfaceLayout.build());
         if (loading) {
             builder.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT));
@@ -181,10 +189,15 @@ public final class ProjectionSurfaceRenderer {
         float[] channels = {0, 1, 2, 3};
         float[] positions = new float[16];
         Map<String, GpuTextureView> textures = new HashMap<>();
+        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
         GpuTextureView fallback = feed == null ? null : feed.colorTextureView();
         if (fallback == null) {
-            fallback = Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
+            fallback = textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
         }
+        textures.put(PORTAL_SKY_SAMPLER, textureManager.getTexture(AbstractEndPortalRenderer.END_SKY_LOCATION).getTextureView());
+        textures.put(PORTAL_LAYERS_SAMPLER, textureManager.getTexture(AbstractEndPortalRenderer.END_PORTAL_LOCATION).getTextureView());
+        GpuSampler repeat = RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST);
+        Map<String, GpuSampler> samplers = Map.of(PORTAL_SKY_SAMPLER, repeat, PORTAL_LAYERS_SAMPLER, repeat);
         List<Projection> group = GROUPS.getOrDefault(projectorPos, List.of());
         for (int index = 0; index < MAX_PROJECTIONS; index++) {
             Projection projection = index < group.size() ? group.get(index) : null;
@@ -205,6 +218,7 @@ public final class ProjectionSurfaceRenderer {
                 positions[index * 4] = offset.getX() + 0.5F + facing.getStepX() * 0.5F;
                 positions[index * 4 + 1] = offset.getY() + 0.5F + facing.getStepY() * 0.5F;
                 positions[index * 4 + 2] = offset.getZ() + 0.5F + facing.getStepZ() * 0.5F;
+                positions[index * 4 + 3] = projection.feed().staticAmount();
             }
         }
         BlockPos offset = mesh.origin.subtract(projectorPos);
@@ -216,7 +230,7 @@ public final class ProjectionSurfaceRenderer {
             for (float value : positions) data.putFloat(value);
             data.putFloat(loadingOpacity).putFloat(CROSSFADE_WIDTH).putFloat(0).putFloat(0).flip();
             try (GpuBuffer parameters = RenderSystem.getDevice().createBuffer(() -> "GLASS surface parameters", GpuBuffer.USAGE_UNIFORM, data)) {
-                mesh.vertexBuffer.draw(loading ? LOADING_PIPELINE : SURFACE_PIPELINE, pose, textures, parameters);
+                mesh.vertexBuffer.draw(loading ? LOADING_PIPELINE : SURFACE_PIPELINE, pose, textures, samplers, parameters);
             }
         }
     }

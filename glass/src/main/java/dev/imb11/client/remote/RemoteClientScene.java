@@ -28,7 +28,6 @@ import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
-import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -55,13 +54,11 @@ final class RemoteClientScene implements AutoCloseable {
     private static final int STORAGE_VIEW_DISTANCE = 2;
     private final boolean mainWorld;
     private final ProjectionSource source;
-    private final Minecraft minecraft;
     private final ResourceKey<DimensionType> dimensionType;
     private final boolean hardcore;
     private final boolean debug;
     private final boolean flat;
     private final long seedHash;
-    private final ClientLevel.ClientLevelData levelData;
     private final ClientLevel level;
     private final ClientChunkCache chunkCache;
     private final LevelLightEngine lightEngine;
@@ -84,19 +81,16 @@ final class RemoteClientScene implements AutoCloseable {
             boolean debug,
             boolean flat,
             long seedHash,
-            ClientLevel.ClientLevelData levelData,
             ClientLevel level,
             ProjectionLightmap lightTexture,
             RemoteWorldState state
     ) {
         this.source = source;
-        this.minecraft = minecraft;
         this.dimensionType = dimensionType;
         this.hardcore = hardcore;
         this.debug = debug;
         this.flat = flat;
         this.seedHash = seedHash;
-        this.levelData = levelData;
         this.level = level;
         this.mainWorld = level == minecraft.level;
         this.chunkCache = level.getChunkSource();
@@ -113,7 +107,7 @@ final class RemoteClientScene implements AutoCloseable {
                 .getOrThrow(packet.dimensionType());
         if (minecraft.level != null && minecraft.level.dimension().equals(packet.subscription().source().dimension())) {
             return new RemoteClientScene(packet.subscription().source(), minecraft, packet.dimensionType(),
-                    packet.hardcore(), packet.debug(), packet.flat(), packet.seedHash(), null,
+                    packet.hardcore(), packet.debug(), packet.flat(), packet.seedHash(),
                     minecraft.level, new ProjectionLightmap(), packet.state());
         }
         RemoteSceneSinkExtractor extractor = new RemoteSceneSinkExtractor(minecraft);
@@ -143,7 +137,6 @@ final class RemoteClientScene implements AutoCloseable {
                     packet.debug(),
                     packet.flat(),
                     packet.seedHash(),
-                    levelData,
                     level,
                     lightTexture,
                     packet.state()
@@ -155,7 +148,7 @@ final class RemoteClientScene implements AutoCloseable {
         } catch (RuntimeException exception) {
             if (lightTexture != null) {
                 ProjectionLightmap failedProjectionLightmap = lightTexture;
-                cleanupCreation("light texture", () -> closeProjectionLightmap(minecraft, failedProjectionLightmap));
+                cleanupCreation("light texture", () -> closeProjectionLightmap(failedProjectionLightmap));
             }
             throw exception;
         }
@@ -625,7 +618,7 @@ final class RemoteClientScene implements AutoCloseable {
             return;
         }
         cleanup("tint caches", level::clearTintCaches);
-        cleanup("light texture", () -> closeProjectionLightmap(minecraft, lightTexture));
+        cleanup("light texture", () -> closeProjectionLightmap(lightTexture));
     }
 
     private void resetOwnersChunk(ChunkPos pos) {
@@ -634,7 +627,7 @@ final class RemoteClientScene implements AutoCloseable {
         }
     }
 
-    private static void closeProjectionLightmap(Minecraft minecraft, ProjectionLightmap lightTexture) {
+    private static void closeProjectionLightmap(ProjectionLightmap lightTexture) {
         lightTexture.close();
     }
 

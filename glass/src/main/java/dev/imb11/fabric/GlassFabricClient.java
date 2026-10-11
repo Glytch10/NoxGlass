@@ -1,15 +1,12 @@
 //? fabric {
 package dev.imb11.fabric;
 
-import dev.imb11.blocks.GBlocks;
-import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.blocks.entity.TerminalBlockEntity;
 import dev.imb11.client.GlassClient;
 import dev.imb11.client.gui.ProjectorBlockGUI;
 import dev.imb11.client.gui.ProjectorBlockScreen;
 import dev.imb11.client.gui.TerminalBlockGUI;
 import dev.imb11.client.gui.TerminalBlockScreen;
-import dev.imb11.client.renderer.block.ProjectorBlockEntityRenderer;
 import dev.imb11.client.renderer.block.TerminalBlockEntityRenderer;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientBlockEntityEvents;

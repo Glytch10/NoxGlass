@@ -5,7 +5,6 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
-import dev.imb11.client.renderer.projection.ProjectionLightmap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.LightLayer;

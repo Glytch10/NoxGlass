@@ -5,6 +5,7 @@ import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
@@ -36,6 +37,11 @@ public final class ProjectionMesh implements AutoCloseable {
     }
 
     public void draw(RenderPipeline pipeline, Matrix4f pose, Map<String, GpuTextureView> textures, GpuBuffer parameters) {
+        draw(pipeline, pose, textures, Map.of(), parameters);
+    }
+
+    public void draw(RenderPipeline pipeline, Matrix4f pose, Map<String, GpuTextureView> textures, Map<String, GpuSampler> samplers,
+                     GpuBuffer parameters) {
         var target = Minecraft.getInstance().gameRenderer.mainRenderTarget();
         var indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
         var indexBuffer = indices.getBuffer(indexCount);
@@ -48,7 +54,8 @@ public final class ProjectionMesh implements AutoCloseable {
             if (parameters != null) {
                 pass.setUniform("SurfaceParameters", parameters);
             }
-            textures.forEach((name, texture) -> pass.bindTexture(name, texture, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR)));
+            textures.forEach((name, texture) -> pass.bindTexture(name, texture,
+                    samplers.getOrDefault(name, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR))));
             pass.setVertexBuffer(0, vertices.slice());
             pass.setIndexBuffer(indexBuffer, indices.type());
             pass.drawIndexed(indexCount, 1, 0, 0, 0);
