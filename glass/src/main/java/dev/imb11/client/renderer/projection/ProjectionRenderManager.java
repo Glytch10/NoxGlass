@@ -87,6 +87,7 @@ public final class ProjectionRenderManager {
     private static final int FEED_BUILD_BUFFERS = Math.min(4, Math.max(1, Runtime.getRuntime().availableProcessors() - 1));
     private static final long BUILD_PREPARATION_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
     private static final long UPLOAD_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
+    private static final long HELD_FRAME_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5L);
     private static final float CAMERA_FACE_OFFSET = 0.5625F;
     private static final float PORTAL_CLIP_MIN_DISTANCE = 0.05F;
     private static final Map<FeedKey, ProjectionFeed> FEEDS = new LinkedHashMap<>();
@@ -709,16 +710,20 @@ public final class ProjectionRenderManager {
             resizeTarget(feed, portalView.targetWidth(), portalView.targetHeight());
             return true;
         }
-        if (feed.terrain != null && feed.terrain.references == 1 && feed.level() == level
-                && feed.rendererRadius() == grantedRadius && !TERRAINS.containsKey(terrainKey)) {
+        if (feed.terrain != null && feed.level() == level && feed.rendererRadius() == grantedRadius
+                && !TERRAINS.containsKey(terrainKey)
+                && (feed.terrain.references == 1 || feed.terrain.lastRekeyFrame != frameSequence)) {
             TERRAINS.remove(feed.terrain.key, feed.terrain);
             feed.terrain.key = terrainKey;
+            feed.terrain.lastRekeyFrame = frameSequence;
             TERRAINS.put(terrainKey, feed.terrain);
             resizeTarget(feed, portalView.targetWidth(), portalView.targetHeight());
             return true;
         }
         releaseTerrain(feed);
-        feed.ready = false;
+        if (feed.ready) {
+            feed.holdingFrameSinceNanos = System.nanoTime();
+        }
         feed.terrainReadyFrames = 0;
         if (feed.target == null) {
             feed.target = new TextureTarget("GLASS feed", portalView.targetWidth(), portalView.targetHeight(), true, GpuFormat.RGBA8_UNORM);
@@ -874,10 +879,16 @@ public final class ProjectionRenderManager {
     }
 
     private static void renderFeed(Minecraft minecraft, DeltaTracker deltaTracker, ProjectionFeed feed, PortalView portalView) {
+        if (feed.holdingFrameSinceNanos >= 0L && feed.terrainReadyFrames < 2
+                && System.nanoTime() - feed.holdingFrameSinceNanos > HELD_FRAME_TIMEOUT_NANOS) {
+            feed.holdingFrameSinceNanos = -1L;
+            feed.ready = false;
+        }
         if (feed.level() == null || feed.renderer() == null || feed.target == null || feed.lightTexture() == null
-                || (!feed.ready && feed.terrainReadyFrames < 2)) {
+                || (feed.terrainReadyFrames < 2 && (!feed.ready || feed.holdingFrameSinceNanos >= 0L))) {
             return;
         }
+        feed.holdingFrameSinceNanos = -1L;
         try (ProjectionRenderContext.Scope ignored = ProjectionRenderContext.enter(feed.renderer(), feed.camera,
                 feed.target, feed.source.pos(), feed.level(), feed.lightTexture())) {
             feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false), frameSequence);
@@ -1182,6 +1193,7 @@ public final class ProjectionRenderManager {
         private long lastBuildFrame = -1L;
         private int scheduledBuilds;
         private int strandedFrames;
+        private long lastRekeyFrame = -1L;
 
         private TerrainResources(TerrainKey key) {
             this.key = key;
@@ -1264,6 +1276,7 @@ public final class ProjectionRenderManager {
         private float previewAspect;
         private final long previewStartedNanos = System.nanoTime();
         private int terrainReadyFrames;
+        private long holdingFrameSinceNanos = -1L;
         private boolean available;
         private RemoteSceneHandle remoteScene;
         private TerrainResources terrain;
