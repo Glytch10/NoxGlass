@@ -7,7 +7,13 @@ import net.minecraft.util.ARGB;
 import net.minecraft.world.attribute.EnvironmentAttributes;
 
 public final class ProjectionLightmap extends Lightmap {
-    public void update(ProjectionCamera camera, float partialTick) {
+    private long lastUpdateFrame = -1L;
+
+    public void update(ProjectionCamera camera, float partialTick, long frame) {
+        if (frame == lastUpdateFrame) {
+            return;
+        }
+        lastUpdateFrame = frame;
         LightmapRenderState state = new LightmapRenderState();
         state.needsUpdate = true;
         state.blockFactor = 1.4F;

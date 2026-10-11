@@ -913,7 +913,7 @@ public final class ProjectionRenderManager {
         }
         try (ProjectionRenderContext.Scope ignored = ProjectionRenderContext.enter(feed.renderer(), feed.camera,
                 feed.target, feed.source.pos(), feed.level(), feed.lightTexture())) {
-            feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false));
+            feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false), frameSequence);
             feed.renderer().renderScene(feed.camera, new Matrix4f(portalView.projection()),
                     new Matrix4f(portalView.skyProjection()), deltaTracker);
             feed.ready = true;
