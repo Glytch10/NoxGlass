@@ -137,8 +137,7 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         gridCenter = null;
     }
 
-    public void prepareCamera(ProjectionCamera camera) {
-        ChunkPos center = camera.gridCenter();
+    public void prepareCamera(ProjectionCamera camera, ChunkPos center) {
         if (!center.equals(gridCenter)) {
             SectionPos cameraSection = SectionPos.of(center.x(), SectionPos.blockToSectionCoord(camera.position().y), center.z());
             viewArea().repositionCamera(cameraSection);

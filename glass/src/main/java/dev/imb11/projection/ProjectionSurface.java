@@ -15,7 +15,7 @@ import java.util.TreeSet;
 public final class ProjectionSurface {
     public static final int REVEAL_EDGE_WIDTH = 2;
     public static final int MAX_RADIUS = 64;
-    public static final int MAX_FACES = 100;
+    public static final int MAX_FACES = 400;
 
     private static final double BOUNDS_INFLATION = 0.01D;
     private static final Comparator<FaceKey> FACE_KEY_COMPARATOR = Comparator

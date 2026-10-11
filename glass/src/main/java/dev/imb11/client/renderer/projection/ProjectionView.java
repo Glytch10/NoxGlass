@@ -40,6 +40,20 @@ record ProjectionView(
         return Vec3.atLowerCornerOf(facing.getUnitVec3i());
     }
 
+    boolean planar() {
+        if (faces.isEmpty()) {
+            return true;
+        }
+        Direction.Axis axis = facing.getAxis();
+        int plane = faces.getFirst().position().get(axis);
+        for (ProjectionSurface.Face face : faces) {
+            if (face.normal() != facing || face.position().get(axis) != plane) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     Vec3 projectorAnchor() {
         return Vec3.atCenterOf(projectorPos).add(normal().scale(PROJECTOR_PLANE_OFFSET));
     }

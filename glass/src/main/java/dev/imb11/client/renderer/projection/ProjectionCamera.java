@@ -1,8 +1,6 @@
 package dev.imb11.client.renderer.projection;
 
 import net.minecraft.client.Camera;
-import net.minecraft.world.level.ChunkPos;
-import dev.imb11.projection.ProjectionChunkRegion;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -11,20 +9,6 @@ import org.joml.Vector3f;
 public final class ProjectionCamera extends Camera {
     private static final float NEAR_DISTANCE = 0.05F;
     private final Matrix4f projection = new Matrix4f();
-    private ChunkPos gridCenter;
-
-    public ChunkPos retainGridCenter(Vec3 position) {
-        if (gridCenter == null || Math.abs(position.x - gridCenter.getMiddleBlockX()) > 16.0D
-                || Math.abs(position.z - gridCenter.getMiddleBlockZ()) > 16.0D) {
-            gridCenter = ProjectionChunkRegion.cameraCenter(position);
-        }
-        return gridCenter;
-    }
-
-    public ChunkPos gridCenter() {
-        return gridCenter == null ? ProjectionChunkRegion.cameraCenter(position()) : gridCenter;
-    }
-
     public void setPose(Vec3 position, Quaternionf pose) {
         Quaternionf normalizedPose = new Quaternionf(pose).normalize();
         Vector3f look = new Vector3f(0.0F, 0.0F, -1.0F).rotate(normalizedPose);

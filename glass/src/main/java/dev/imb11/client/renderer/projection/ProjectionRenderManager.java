@@ -89,7 +89,9 @@ public final class ProjectionRenderManager {
     private static final long UPLOAD_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(2L);
     private static final long HELD_FRAME_TIMEOUT_NANOS = TimeUnit.SECONDS.toNanos(5L);
     private static final float CAMERA_FACE_OFFSET = 0.5625F;
+    private static final double PORTAL_MAPPING_OFFSET = 0.5D;
     private static final float PORTAL_CLIP_MIN_DISTANCE = 0.05F;
+    private static final double GRID_RECENTER_DISTANCE = 16.0D;
     private static final Map<FeedKey, ProjectionFeed> FEEDS = new LinkedHashMap<>();
     private static final Map<TerrainKey, TerrainResources> TERRAINS = new HashMap<>();
     private static final Map<ProjectionOwner, PortalSide> PORTAL_SIDES = new HashMap<>();
@@ -252,6 +254,7 @@ public final class ProjectionRenderManager {
                     anchor.origin(), anchor.facing(), anchor.uDirection(), anchor.vDirection(),
                     List.copyOf(faces.values()), bounds);
             alignment.side.track(combined, viewer, frameSequence);
+            alignment.planar = combined.planar();
             for (ProjectionFeed feed : connected) {
                 if (feed.alignment != alignment) {
                     feed.ready = false;
@@ -663,7 +666,29 @@ public final class ProjectionRenderManager {
     }
 
     private static ChunkPos viewCenterChunk(ProjectionFeed feed) {
-        return feed.camera.retainGridCenter(feed.cameraPosition);
+        TerrainResources terrain = feed.terrain == null ? alignedTerrain(feed) : feed.terrain;
+        Vec3 position = feed.cameraPosition;
+        if (terrain != null) {
+            ChunkPos retained = terrain.key.center();
+            if (Math.abs(position.x - retained.getMiddleBlockX()) <= GRID_RECENTER_DISTANCE
+                    && Math.abs(position.z - retained.getMiddleBlockZ()) <= GRID_RECENTER_DISTANCE) {
+                return retained;
+            }
+        }
+        return ProjectionChunkRegion.cameraCenter(position);
+    }
+
+    @Nullable
+    private static TerrainResources alignedTerrain(ProjectionFeed feed) {
+        if (feed.alignment == null) {
+            return null;
+        }
+        for (ProjectionFeed other : FEEDS.values()) {
+            if (other.alignment == feed.alignment && other.terrain != null) {
+                return other.terrain;
+            }
+        }
+        return null;
     }
 
     private static void releaseProjectorNow(ResourceKey<Level> dimension, BlockPos projectorPos) {
@@ -712,7 +737,7 @@ public final class ProjectionRenderManager {
         }
         if (feed.terrain != null && feed.level() == level && feed.rendererRadius() == grantedRadius
                 && !TERRAINS.containsKey(terrainKey)
-                && (feed.terrain.references == 1 || feed.terrain.lastRekeyFrame != frameSequence)) {
+                && (feed.terrain.references == 1 || frameSequence - feed.terrain.lastRekeyFrame > 1)) {
             TERRAINS.remove(feed.terrain.key, feed.terrain);
             feed.terrain.key = terrainKey;
             feed.terrain.lastRekeyFrame = frameSequence;
@@ -769,7 +794,7 @@ public final class ProjectionRenderManager {
                 feed.renderer(), feed.camera, feed.target, feed.source.pos(), feed.level(), feed.lightTexture()
         )) {
             ProjectionLevelRenderer renderer = feed.renderer();
-            renderer.prepareCamera(feed.camera);
+            renderer.prepareCamera(feed.camera, feed.terrain.key.center());
             SectionRenderDispatcher dispatcher = renderer.sectionRenderDispatcher();
             uploadTerrain(dispatcher);
             Iterable<SectionRenderDispatcher.RenderSection> sections = ((ViewAreaAccessor) renderer.viewArea()).glass$getSections();
@@ -930,8 +955,10 @@ public final class ProjectionRenderManager {
         }
         ProjectionView view = feed.alignment == null ? feed.view : feed.alignment.anchor;
         PortalSide portalSide = feed.alignment == null ? feed.side : feed.alignment.side;
+        boolean planar = feed.alignment == null ? feed.view.planar() : feed.alignment.planar;
         Vec3 surfaceNormal = view.normal();
-        Vec3 viewerOffset = viewerCamera.position().subtract(view.projectorAnchor());
+        Vec3 viewerOffset = viewerCamera.position().subtract(
+                Vec3.atCenterOf(view.projectorPos()).add(surfaceNormal.scale(PORTAL_MAPPING_OFFSET)));
         double side = portalSide.resolve(view, viewerCamera.position());
         Vec3 sourceRight = directionVector(view.uDirection()).scale(side);
         Vec3 sourceUp = directionVector(view.vDirection());
@@ -956,7 +983,7 @@ public final class ProjectionRenderManager {
         double verticalOffset = viewerOffset.dot(sourceUp);
         double normalOffset = viewerOffset.dot(sourceBack);
         Vec3 destinationAnchor = cameraPosition(feed.source);
-        Vec3 dynamicPosition = destinationAnchor
+        Vec3 dynamicPosition = Vec3.atCenterOf(feed.source.pos()).add(destinationLook.scale(PORTAL_MAPPING_OFFSET))
                 .add(destinationRight.scale(horizontalOffset))
                 .add(destinationUp.scale(verticalOffset))
                 .add(destinationBack.scale(normalOffset));
@@ -964,7 +991,7 @@ public final class ProjectionRenderManager {
         PortalView portalView = new PortalView(
                 dynamicPosition,
                 cameraRotation,
-                clipToPlane(mainProjection, cameraRotation, dynamicPosition, destinationAnchor, destinationLook),
+                planar ? clipToPlane(mainProjection, cameraRotation, dynamicPosition, destinationAnchor, destinationLook) : mainProjection,
                 mainProjection,
                 targetSize.width(),
                 targetSize.height()
@@ -1251,6 +1278,7 @@ public final class ProjectionRenderManager {
         private final ProjectionView anchor;
         private final PortalSide side = new PortalSide();
         private final long createdFrame = frameSequence;
+        private boolean planar = true;
 
         private ProjectionAlignment(ProjectionView anchor) {
             this.anchor = anchor;
