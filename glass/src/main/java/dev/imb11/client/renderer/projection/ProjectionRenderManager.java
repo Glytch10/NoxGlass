@@ -8,6 +8,7 @@ import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import com.mojang.blaze3d.vertex.PoseStack;
+import dev.imb11.client.compat.IrisCompatibility;
 import dev.imb11.client.remote.RemoteSceneClientManager;
 import dev.imb11.debug.FeedDiagnostics;
 import dev.imb11.debug.FeedTrace;
@@ -486,6 +487,12 @@ public final class ProjectionRenderManager {
                 continue;
             }
             if (frameSequence < feed.nextRetryFrame) {
+                continue;
+            }
+
+            if (IrisCompatibility.isShaderPackActive()) {
+                feed.stage = ProjectionStage.SHADER_PACK_ACTIVE;
+                markUnavailable(feed, mainTarget);
                 continue;
             }
 

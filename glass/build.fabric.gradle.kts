@@ -8,6 +8,7 @@ loom {
 
 dependencies {
     compileOnly(mcLibrary("sodium-fabric"))
+    compileOnly(mcLibrary("iris-fabric"))
     if (providers.gradleProperty("with_sodium").isPresent) {
         "localRuntime"(mcLibrary("sodium-fabric"))
     }

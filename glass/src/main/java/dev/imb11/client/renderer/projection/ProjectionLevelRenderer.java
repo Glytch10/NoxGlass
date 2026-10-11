@@ -3,6 +3,7 @@ package dev.imb11.client.renderer.projection;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.ProjectionType;
+import dev.imb11.client.compat.IrisCompatibility;
 import dev.imb11.mixins.LevelRendererBufferAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.DeltaTracker;
@@ -338,7 +339,7 @@ public class ProjectionLevelRenderer extends LevelRenderer {
                         state.optionsRenderState.cloudRange);
             }
             access.glass$weatherPass(frame, terrainFog);
-            frame.execute(GraphicsResourceAllocator.UNPOOLED);
+            IrisCompatibility.renderWithPipeline(this, () -> frame.execute(GraphicsResourceAllocator.UNPOOLED));
         } finally {
             targets.clear();
             featureFrame.close();

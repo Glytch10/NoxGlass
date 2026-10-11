@@ -13,6 +13,7 @@ val sodiumDistribution = configurations.create("sodiumDistribution") {
 
 dependencies {
     add(sodiumDistribution.name, mcLibrary("sodium-neoforge"))
+    compileOnly(mcLibrary("iris-neoforge"))
     compileOnly(files(provider {
         sodiumDistribution.files.flatMap { zipTree(it).matching { include("META-INF/jarjar/net.caffeinemc.sodium-*-mod.jar") }.files }
     }))
