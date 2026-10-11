@@ -72,7 +72,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
     private final int renderDistance;
     private final GameRenderState state = new GameRenderState();
     private final FeatureRenderDispatcher features;
-    private final FogRenderer fog = new FogRenderer();
+    private final List<FogRenderer> fogs = new ArrayList<>();
+    private long fogFrame = -1L;
+    private int fogUses;
     private final ProjectionMatrixBuffer projectionBuffer = new ProjectionMatrixBuffer("GLASS projection");
     private final ProjectionMatrixBuffer skyProjectionBuffer = new ProjectionMatrixBuffer("GLASS sky projection");
     private final GlobalSettingsUniform globals = new GlobalSettingsUniform();
@@ -169,10 +171,22 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         section.compileAsync(regions.createRegion(projectionLevel, section.getSectionNode()));
     }
 
-    public void renderScene(ProjectionCamera camera, Matrix4f projection, Matrix4f skyProjection, DeltaTracker deltaTracker) {
+    private FogRenderer nextFog(long frame) {
+        if (frame != fogFrame) {
+            fogFrame = frame;
+            fogUses = 0;
+        }
+        if (fogUses == fogs.size()) {
+            fogs.add(new FogRenderer());
+        }
+        return fogs.get(fogUses++);
+    }
+
+    public void renderScene(ProjectionCamera camera, Matrix4f projection, Matrix4f skyProjection, DeltaTracker deltaTracker, long frame) {
         var savedProjection = RenderSystem.getProjectionMatrixBuffer();
         var savedFog = RenderSystem.getShaderFog();
         var savedGlobals = RenderSystem.getGlobalSettingsUniform();
+        FogRenderer fog = nextFog(frame);
         var options = state.optionsRenderState;
         var mainOptions = minecraft.gameRenderer.gameRenderState().optionsRenderState;
         options.cloudStatus = mainOptions.cloudStatus;
@@ -208,7 +222,7 @@ public class ProjectionLevelRenderer extends LevelRenderer {
             var target = minecraft.gameRenderer.mainRenderTarget();
             globals.update(target.width, target.height, mainOptions.glintStrength, projectionLevel.getGameTime(),
                     deltaTracker, 0, camera.position(), false);
-            renderProjectionLevel(deltaTracker, sceneProjection, unclippedProjection);
+            renderProjectionLevel(fog, deltaTracker, sceneProjection, unclippedProjection);
         } finally {
             buffers.endFrame();
             endFrame();
@@ -308,7 +322,7 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         }
     }
 
-    private void renderProjectionLevel(DeltaTracker delta, GpuBufferSlice sceneProjection, GpuBufferSlice skyProjection) {
+    private void renderProjectionLevel(FogRenderer fog, DeltaTracker delta, GpuBufferSlice sceneProjection, GpuBufferSlice skyProjection) {
         var access = (ProjectionRendererAccessor) this;
         var targets = access.glass$targets();
         var levelState = state.levelRenderState;
@@ -451,7 +465,8 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         setLevel(null);
         super.close();
         features.close();
-        fog.close();
+        fogs.forEach(FogRenderer::close);
+        fogs.clear();
         projectionBuffer.close();
         skyProjectionBuffer.close();
         globals.close();

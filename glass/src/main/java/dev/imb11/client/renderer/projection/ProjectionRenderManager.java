@@ -915,7 +915,7 @@ public final class ProjectionRenderManager {
                 feed.target, feed.source.pos(), feed.level(), feed.lightTexture())) {
             feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false), frameSequence);
             feed.renderer().renderScene(feed.camera, new Matrix4f(portalView.projection()),
-                    new Matrix4f(portalView.skyProjection()), deltaTracker);
+                    new Matrix4f(portalView.skyProjection()), deltaTracker, frameSequence);
             feed.ready = true;
             feed.available = true;
             feed.nextRetryFrame = 0L;
