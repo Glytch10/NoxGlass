@@ -33,6 +33,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -48,6 +49,7 @@ public final class ProjectionSurfaceRenderer {
     private static ClientLevel activeLevel;
     private static List<Projection> projections = List.of();
     private static final Map<FaceKey, SharedFace> SHARED_FACES = new HashMap<>();
+    private static final Map<BlockPos, List<Projection>> GROUPS = new HashMap<>();
     private static final Map<EdgeKey, EnumSet<Direction>> SHARED_EDGE_NORMALS = new HashMap<>();
     private static long layoutVersion;
     private static final RenderPipeline SURFACE_PIPELINE = pipeline(false);
@@ -84,7 +86,6 @@ public final class ProjectionSurfaceRenderer {
         }
         List<Projection> next = visibleProjections.stream()
                 .sorted(Comparator.comparingLong(projection -> projection.projectorPos().asLong()))
-                .limit(MAX_PROJECTIONS)
                 .toList();
         boolean changed = projections.size() != next.size();
         for (int index = 0; !changed && index < next.size(); index++) {
@@ -101,21 +102,58 @@ public final class ProjectionSurfaceRenderer {
         layoutVersion++;
         SHARED_FACES.clear();
         SHARED_EDGE_NORMALS.clear();
-        for (int index = 0; index < projections.size(); index++) {
-            for (ProjectionSurface.Face face : projections.get(index).surface().faces()) {
-                FaceKey key = new FaceKey(face.position(), face.normal());
-                SharedFace shared = SHARED_FACES.get(key);
-                if (shared == null) {
-                    shared = new SharedFace(index);
-                    SHARED_FACES.put(key, shared);
-                    addEdgeNormals(geometry(face), SHARED_EDGE_NORMALS);
+        GROUPS.clear();
+        for (List<Projection> group : blendGroups(projections)) {
+            for (int index = 0; index < group.size(); index++) {
+                Projection projection = group.get(index);
+                GROUPS.put(projection.projectorPos(), group);
+                for (ProjectionSurface.Face face : projection.surface().faces()) {
+                    FaceKey key = new FaceKey(face.position(), face.normal());
+                    SharedFace shared = SHARED_FACES.get(key);
+                    if (shared == null) {
+                        shared = new SharedFace(projection.projectorPos());
+                        SHARED_FACES.put(key, shared);
+                        addEdgeNormals(geometry(face), SHARED_EDGE_NORMALS);
+                    }
+                    if (face.revealDistance() < 0 || face.revealDistance() >= DISTANCE_RADIX) {
+                        throw new IllegalArgumentException("Projection reveal distance is outside the 12-bit mesh range");
+                    }
+                    shared.distances[index] = face.revealDistance();
                 }
-                if (face.revealDistance() < 0 || face.revealDistance() >= DISTANCE_RADIX) {
-                    throw new IllegalArgumentException("Projection reveal distance is outside the 12-bit mesh range");
-                }
-                shared.distances[index] = face.revealDistance();
             }
         }
+    }
+
+    private static List<List<Projection>> blendGroups(List<Projection> projections) {
+        int[] roots = new int[projections.size()];
+        for (int index = 0; index < roots.length; index++) {
+            roots[index] = index;
+        }
+        Map<FaceKey, Integer> firstOwners = new HashMap<>();
+        for (int index = 0; index < projections.size(); index++) {
+            for (ProjectionSurface.Face face : projections.get(index).surface().faces()) {
+                Integer owner = firstOwners.putIfAbsent(new FaceKey(face.position(), face.normal()), index);
+                if (owner != null) {
+                    roots[root(roots, index)] = root(roots, owner);
+                }
+            }
+        }
+        Map<Integer, List<Projection>> groups = new LinkedHashMap<>();
+        for (int index = 0; index < projections.size(); index++) {
+            List<Projection> group = groups.computeIfAbsent(root(roots, index), ignored -> new ArrayList<>());
+            if (group.size() < MAX_PROJECTIONS) {
+                group.add(projections.get(index));
+            }
+        }
+        return List.copyOf(groups.values());
+    }
+
+    private static int root(int[] roots, int index) {
+        while (roots[index] != index) {
+            roots[index] = roots[roots[index]];
+            index = roots[index];
+        }
+        return index;
     }
 
     public static void render(ClientLevel level, BlockPos projectorPos, ProjectionSurface surface,
@@ -136,12 +174,13 @@ public final class ProjectionSurfaceRenderer {
         if (fallback == null) {
             fallback = Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
         }
+        List<Projection> group = GROUPS.getOrDefault(projectorPos, List.of());
         for (int index = 0; index < MAX_PROJECTIONS; index++) {
-            Projection projection = index < projections.size() ? projections.get(index) : null;
+            Projection projection = index < group.size() ? group.get(index) : null;
             textures.put(PROJECTION_SAMPLERS[index], projection == null ? fallback : projection.feed().colorTextureView());
             if (projection != null) {
                 for (int previous = 0; previous < index; previous++) {
-                    if (projections.get(previous).feed().source().equals(projection.feed().source())) {
+                    if (group.get(previous).feed().source().equals(projection.feed().source())) {
                         channels[index] = channels[previous];
                         break;
                     }
@@ -213,7 +252,7 @@ public final class ProjectionSurfaceRenderer {
             if (loading) {
                 addEdgeNormals(geometry, edgeNormals);
             }
-            if (loading || shared != null && projections.get(shared.owner).projectorPos().equals(projectorPos)) {
+            if (loading || shared != null && shared.owner.equals(projectorPos)) {
                 faceGeometries.add(geometry);
                 if (shared != null) {
                     for (int index = 0; index < MAX_PROJECTIONS; index++) {
@@ -379,6 +418,7 @@ public final class ProjectionSurfaceRenderer {
         CACHED_MESHES.clear();
         projections = List.of();
         SHARED_FACES.clear();
+        GROUPS.clear();
         SHARED_EDGE_NORMALS.clear();
         layoutVersion++;
         activeLevel = null;
@@ -432,10 +472,10 @@ public final class ProjectionSurfaceRenderer {
     }
 
     private static final class SharedFace {
-        private final int owner;
+        private final BlockPos owner;
         private final int[] distances = new int[MAX_PROJECTIONS];
 
-        private SharedFace(int owner) {
+        private SharedFace(BlockPos owner) {
             this.owner = owner;
             Arrays.fill(distances, -1);
         }

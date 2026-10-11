@@ -16,7 +16,6 @@ import dev.imb11.client.renderer.projection.ProjectionSurfaceRenderer;
 import dev.imb11.client.renderer.projection.ProjectionStage;
 import dev.imb11.projection.ProjectionSurface;
 import dev.imb11.sync.ProjectionSource;
-import dev.imb11.sync.remote.RemoteSceneServerManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.culling.Frustum;
@@ -50,8 +49,7 @@ public final class ProjectorBlockEntityRenderer {
     private static final long LOADING_FADE_NANOS = 500_000_000L;
     private static final float LOADING_MAX_OPACITY = 0.35F;
     private static final int VIEW_DISTANCE = 64;
-    private static final double VIEW_DISTANCE_SQUARED = VIEW_DISTANCE * VIEW_DISTANCE;
-    private static final Map<ClientLevel, Map<BlockPos, ProjectorBlockEntity>> LOADED_PROJECTORS = new IdentityHashMap<>();
+    private static final double VIEW_DISTANCE_SQUARED = VIEW_DISTANCE * VIEW_DISTANCE;    private static final Map<ClientLevel, Map<BlockPos, ProjectorBlockEntity>> LOADED_PROJECTORS = new IdentityHashMap<>();
     private static ClientLevel frustumLevel;
     private static long frustumFrame = Long.MIN_VALUE;
     private static Frustum frustum;
@@ -146,10 +144,7 @@ public final class ProjectorBlockEntityRenderer {
         nearby.sort(Comparator.comparing((ProjectorBlockEntity projector) -> !projector.isProjectionVisible())
                 .thenComparingDouble(projector -> distanceToSqr(projector.getProjectionSurface().renderBounds(), viewer))
                 .thenComparingLong(projector -> projector.getBlockPos().asLong()));
-        int selectedCount = Math.min(nearby.size(), RemoteSceneServerManager.MAX_SUBSCRIPTIONS_PER_PLAYER);
-        ProjectionRenderManager.prepareRequests(nearby.subList(0, selectedCount));
-        for (int i = 0; i < selectedCount; i++) {
-            ProjectorBlockEntity projector = nearby.get(i);
+        for (ProjectorBlockEntity projector : nearby) {
             ProjectionRenderManager.ProjectionFeed feed = ProjectionRenderManager.requestFeed(
                     ClientProjectionSourceRegistry.resolve(projector.getChannel()),
                     projector.getBlockPos(),
@@ -158,10 +153,7 @@ public final class ProjectorBlockEntityRenderer {
             projector.setClientProjectionReady(ProjectionRenderManager.isReady(feed));
             ProjectorActivationTrace.report(projector, feed == null ? ProjectionStage.FEED_REQUEST_REJECTED : feed.stage(), feed);
         }
-        for (int i = RemoteSceneServerManager.MAX_SUBSCRIPTIONS_PER_PLAYER; i < nearby.size(); i++) {
-            ProjectorActivationTrace.report(nearby.get(i), ProjectionStage.SUBSCRIPTION_LIMIT, null);
-        }
-        ProjectionRenderManager.alignFeeds(nearby.subList(0, selectedCount));
+        ProjectionRenderManager.alignFeeds(nearby);
     }
 
     public static void prepareSurfaceBlending(ClientLevel level) {

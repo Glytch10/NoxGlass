@@ -21,8 +21,7 @@ public enum ProjectionStage {
     OUTSIDE_PRELOAD_RANGE,
     MISSING_SURFACE,
     OUTSIDE_SURFACE_RANGE,
-    FEED_REQUEST_REJECTED,
-    SUBSCRIPTION_LIMIT;
+    FEED_REQUEST_REJECTED;
 
     @Override
     public String toString() {

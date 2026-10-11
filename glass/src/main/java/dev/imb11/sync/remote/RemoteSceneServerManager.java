@@ -57,7 +57,6 @@ public final class RemoteSceneServerManager {
     public static final int MAX_RADIUS = 6;
     public static final int MIN_RADIUS = 1;
     public static final int SOURCE_CAMERA_BUDGET = 32;
-    public static final int MAX_SUBSCRIPTIONS_PER_PLAYER = 4;
     public static final int MAX_CHUNKS_PER_PLAYER = 512;
     public static final int MAX_CHUNKS_GLOBAL = 4096;
     public static final int SUBSCRIPTION_TIMEOUT_TICKS = 100;
@@ -112,17 +111,13 @@ public final class RemoteSceneServerManager {
         List<Subscription> replacements = playerState.subscriptions.values().stream()
                 .filter(subscription -> subscription.id.sameProjector(id))
                 .toList();
-        boolean overBudget = playerState.subscriptions.size() - replacements.size() >= MAX_SUBSCRIPTIONS_PER_PLAYER;
         Denial denial = denial(server, player, id, packet.cameraCenter());
-        if (overBudget
-                || packet.requestedRadius() < 1
+        if (packet.requestedRadius() < 1
                 || packet.requestedRadius() > MAX_RADIUS
                 || denial != null) {
             RemoteStreamTrace.rejected("subscribe", player.getUUID(), id, packet.requestedRadius(), denial,
                     "subscriptions=" + playerState.subscriptions.size() + " replacements=" + replacements.size());
-            send(player, new S2CRemoteUnavailablePacket(id, overBudget
-                    ? S2CRemoteUnavailablePacket.Reason.BUDGET
-                    : S2CRemoteUnavailablePacket.Reason.INVALID));
+            send(player, new S2CRemoteUnavailablePacket(id, S2CRemoteUnavailablePacket.Reason.INVALID));
             return;
         }
         for (Subscription replacement : replacements) {

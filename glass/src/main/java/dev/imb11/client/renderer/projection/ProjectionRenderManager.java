@@ -22,7 +22,6 @@ import dev.imb11.projection.ProjectionSurface;
 import dev.imb11.projection.ProjectionChunkRegion;
 import dev.imb11.sync.ProjectionSource;
 import dev.imb11.sync.remote.RemoteSubscriptionId;
-import dev.imb11.sync.remote.RemoteSceneServerManager;
 import net.minecraft.client.Camera;
 import net.minecraft.client.CloudStatus;
 import net.minecraft.client.DeltaTracker;
@@ -70,7 +69,6 @@ import java.util.function.Predicate;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
@@ -173,7 +171,6 @@ public final class ProjectionRenderManager {
                 FEEDS.remove(key);
                 closeFeed(feed);
             }
-            evictIdleFeeds(1);
             ProjectionView view = new ProjectionView(minecraft.level.dimension(), ownerPos, ownerPos,
                     Direction.NORTH, Direction.EAST, Direction.UP, List.of(), new AABB(ownerPos));
             feed = new ProjectionFeed(key, source, view, new PortalSide(), nextTextureLocation());
@@ -184,36 +181,6 @@ public final class ProjectionRenderManager {
         feed.lastRequestNanos = System.nanoTime();
         feed.lastVisibleFrame = frameSequence;
         return feed;
-    }
-
-    public static void prepareRequests(List<ProjectorBlockEntity> projectors) {
-        Set<FeedKey> requested = new LinkedHashSet<>();
-        for (ProjectorBlockEntity projector : projectors) {
-            ProjectionSource source = registrySources.get(projector.getChannel());
-            if (source != null && activeLevel != null) {
-                requested.add(new FeedKey(source.key(), activeLevel.dimension(), projector.getBlockPos(), false));
-            }
-        }
-        long newFeeds = requested.stream().filter(key -> !FEEDS.containsKey(key)).count();
-        evictFeeds(feed -> !requested.contains(feed.key), newFeeds);
-    }
-
-    private static void evictIdleFeeds(long newFeeds) {
-        evictFeeds(feed -> feed.lastRequestFrame != frameSequence, newFeeds);
-    }
-
-    private static void evictFeeds(Predicate<ProjectionFeed> evictable, long newFeeds) {
-        List<ProjectionFeed> retained = FEEDS.values().stream()
-                .filter(evictable)
-                .sorted(Comparator.comparingLong(feed -> feed.lastRequestNanos))
-                .toList();
-        for (ProjectionFeed feed : retained) {
-            if (FEEDS.size() + newFeeds <= RemoteSceneServerManager.MAX_SUBSCRIPTIONS_PER_PLAYER) {
-                break;
-            }
-            FEEDS.remove(feed.key);
-            closeFeed(feed);
-        }
     }
 
     public static boolean isReady(@Nullable ProjectionFeed feed) {
