@@ -96,6 +96,7 @@ public final class ProjectionSurfaceRenderer {
         }
         projections = next;
         if (!changed) {
+            refreshGroups(next);
             return;
         }
 
@@ -121,6 +122,16 @@ public final class ProjectionSurfaceRenderer {
                     shared.distances[index] = face.revealDistance();
                 }
             }
+        }
+    }
+
+    private static void refreshGroups(List<Projection> current) {
+        Map<BlockPos, Projection> byPosition = new HashMap<>();
+        for (Projection projection : current) {
+            byPosition.put(projection.projectorPos(), projection);
+        }
+        for (List<Projection> group : GROUPS.values()) {
+            group.replaceAll(projection -> byPosition.getOrDefault(projection.projectorPos(), projection));
         }
     }
 
