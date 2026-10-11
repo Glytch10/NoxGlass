@@ -45,6 +45,11 @@ public final class ProjectionCamera extends Camera {
     }
 
     @Override
+    public boolean isDetached() {
+        return true;
+    }
+
+    @Override
     public net.minecraft.client.renderer.culling.Frustum getCullFrustum() {
         var frustum = new net.minecraft.client.renderer.culling.Frustum(getViewRotationMatrix(new Matrix4f()), projection);
         Vec3 position = position();
