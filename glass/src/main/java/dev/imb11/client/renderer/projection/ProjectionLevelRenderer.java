@@ -82,6 +82,25 @@ public class ProjectionLevelRenderer extends LevelRenderer {
     private SectionRenderDispatcher dispatcher;
     private SectionUpdateTracker sectionUpdates;
     private ChunkPos gridCenter;
+    private IrisCompatibility.ShaderTerrain shaderTerrain;
+
+    public GameRenderState renderState() {
+        return state;
+    }
+
+    public ClientLevel projectionLevel() {
+        return projectionLevel;
+    }
+
+    public IrisCompatibility.ShaderTerrain shaderTerrain(Object shaderPack) {
+        if (shaderTerrain == null) {
+            shaderTerrain = IrisCompatibility.createShaderTerrain(this, projectionLevel, renderDistance, shaderPack);
+        } else if (shaderTerrain.shaderPack() != shaderPack) {
+            shaderTerrain.close();
+            shaderTerrain = IrisCompatibility.createShaderTerrain(this, projectionLevel, renderDistance, shaderPack);
+        }
+        return shaderTerrain;
+    }
 
     public ProjectionLevelRenderer(Minecraft minecraft, RenderBuffers buffers, int renderDistance) {
         super(minecraft.getEntityRenderDispatcher(), minecraft.getBlockEntityRenderDispatcher(), minecraft.getModelManager(),
@@ -99,6 +118,10 @@ public class ProjectionLevelRenderer extends LevelRenderer {
     }
 
     public void setLevel(ClientLevel level) {
+        if (shaderTerrain != null) {
+            shaderTerrain.close();
+            shaderTerrain = null;
+        }
         resetLevelRenderData();
         dispatcher = null;
         sectionUpdates = null;
@@ -148,6 +171,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
     }
 
     public void setSectionDirty(int sectionX, int sectionY, int sectionZ) {
+        if (shaderTerrain != null) {
+            shaderTerrain.dirty(sectionX, sectionY, sectionZ);
+        }
         if (sectionUpdates != null) {
             sectionUpdates.setDirty(sectionX, sectionY, sectionZ, false);
         }
@@ -181,7 +207,8 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         return fogs.get(fogUses++);
     }
 
-    public void renderScene(ProjectionCamera camera, Matrix4f projection, Matrix4f skyProjection, DeltaTracker deltaTracker, long frame) {
+    public void renderScene(ProjectionCamera camera, Matrix4f projection, Matrix4f skyProjection, DeltaTracker deltaTracker,
+                            long frame, IrisCompatibility.ShaderView shaderView) {
         var savedProjection = RenderSystem.getProjectionMatrixBuffer();
         var savedFog = RenderSystem.getShaderFog();
         var savedGlobals = RenderSystem.getGlobalSettingsUniform();
@@ -213,7 +240,6 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         cameraState.fogData = fog.setupFog(camera, renderDistance, deltaTracker, 0.0F, projectionLevel);
         state.levelRenderState.reset();
         try {
-            extractLevel(deltaTracker, camera, partialTick);
             fog.updateBuffer(cameraState.fogData);
             GpuBufferSlice sceneProjection = projectionBuffer.getBuffer(projection);
             GpuBufferSlice unclippedProjection = skyProjectionBuffer.getBuffer(skyProjection);
@@ -221,7 +247,15 @@ public class ProjectionLevelRenderer extends LevelRenderer {
             var target = minecraft.gameRenderer.mainRenderTarget();
             globals.update(target.width, target.height, mainOptions.glintStrength, projectionLevel.getGameTime(),
                     deltaTracker, 0, camera.position(), false);
-            renderProjectionLevel(fog, deltaTracker, sceneProjection, unclippedProjection);
+            Runnable render = () -> {
+                extractLevel(deltaTracker, camera, partialTick);
+                renderProjectionLevel(fog, deltaTracker, sceneProjection, unclippedProjection);
+            };
+            if (shaderView == null) {
+                render.run();
+            } else {
+                shaderView.render(this, camera, projection, deltaTracker, render);
+            }
         } finally {
             buffers.endFrame();
             endFrame();
@@ -288,6 +322,10 @@ public class ProjectionLevelRenderer extends LevelRenderer {
     }
 
     private void extractProjectionBlockEntities(float partialTick, LevelRenderState levelState) {
+        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
+            shaderTerrain.extractBlockEntities(partialTick, levelState);
+            return;
+        }
         var dispatcher = blockEntityRenderDispatcher();
         var hidden = ProjectionRenderContext.hiddenTerrainBlock();
         for (var section : visibleSections()) {
@@ -338,9 +376,12 @@ public class ProjectionLevelRenderer extends LevelRenderer {
             targets.main = frame.importExternal("main", target);
             var clear = frame.addPass("clear");
             targets.main = clear.readsAndWrites(targets.main);
-            clear.executes(() -> RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
+            clear.executes(() -> {
+                RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
                     target.getColorTexture(), new Vector4f(camera.fogData.color.x, camera.fogData.color.y,
-                            camera.fogData.color.z, 1.0F), target.getDepthTexture(), 0.0));
+                            camera.fogData.color.z, 1.0F), target.getDepthTexture(), 0.0);
+                IrisCompatibility.beginClear();
+            });
             useProjection(frame, targets, "glass_sky_projection", skyProjection);
             access.glass$skyPass(frame, camera, terrainFog);
             useProjection(frame, targets, "glass_scene_projection", sceneProjection);
@@ -369,6 +410,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
 
     @Override
     public ChunkSectionsToRender prepareChunkRenders(Matrix4fc modelViewMatrix) {
+        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
+            return shaderTerrain.prepareChunkRenders(modelViewMatrix);
+        }
         EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroups = new EnumMap<>(ChunkSectionLayer.class);
         int largestIndexCount = 0;
         for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
@@ -454,6 +498,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
 
     @Override
     public boolean isSectionCompiledAndVisible(BlockPos pos) {
+        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
+            return shaderTerrain.isSectionReady(pos);
+        }
         var section = ProjectionSections.find(this, SectionPos.blockToSectionCoord(pos.getX()),
                 SectionPos.blockToSectionCoord(pos.getY()), SectionPos.blockToSectionCoord(pos.getZ()));
         return section != null && section.getSectionMesh() != net.minecraft.client.renderer.chunk.CompiledSectionMesh.UNCOMPILED;

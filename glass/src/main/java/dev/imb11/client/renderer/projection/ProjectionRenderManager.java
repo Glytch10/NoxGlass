@@ -450,12 +450,6 @@ public final class ProjectionRenderManager {
                 continue;
             }
 
-            if (IrisCompatibility.isShaderPackActive()) {
-                feed.stage = ProjectionStage.SHADER_PACK_ACTIVE;
-                markUnavailable(feed);
-                continue;
-            }
-
             try {
                 PortalView portalView = configurePortalCamera(
                         feed,
@@ -785,6 +779,10 @@ public final class ProjectionRenderManager {
         )) {
             ProjectionLevelRenderer renderer = feed.renderer();
             renderer.prepareCamera(feed.camera, feed.terrain.key.center());
+            if (IrisCompatibility.isShaderPackInUse()) {
+                feed.terrainReadyFrames = feed.remoteScene.isComplete() ? 2 : 0;
+                return;
+            }
             SectionRenderDispatcher dispatcher = renderer.sectionRenderDispatcher();
             uploadTerrain(dispatcher);
             Iterable<SectionRenderDispatcher.RenderSection> sections = ((ViewAreaAccessor) renderer.viewArea()).glass$getSections();
@@ -904,11 +902,13 @@ public final class ProjectionRenderManager {
         feed.holdingFrameSinceNanos = -1L;
         try (ProjectionRenderContext.Scope ignored = ProjectionRenderContext.enter(feed.renderer(), feed.camera,
                 feed.target, feed.source.pos(), feed.level(), feed.lightTexture())) {
-            feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false), frameSequence);
-            feed.renderer().renderScene(feed.camera, new Matrix4f(portalView.projection()),
-                    new Matrix4f(portalView.skyProjection()), deltaTracker, frameSequence);
-            feed.ready = true;
-            feed.available = true;
+            IrisCompatibility.preservingCapturedState(() -> {
+                feed.lightTexture().update(feed.camera, deltaTracker.getGameTimeDeltaPartialTick(false), frameSequence);
+                feed.renderer().renderScene(feed.camera, new Matrix4f(portalView.projection()),
+                        new Matrix4f(portalView.skyProjection()), deltaTracker, frameSequence, feed.shaderView);
+            });
+            feed.ready = feed.shaderView == null || feed.shaderView.isReady();
+            feed.available = feed.ready;
             feed.nextRetryFrame = 0L;
         }
     }
@@ -1140,6 +1140,9 @@ public final class ProjectionRenderManager {
         feed.ready = false;
         feed.terrainReadyFrames = 0;
         feed.available = false;
+        if (feed.shaderView != null) {
+            cleanup(feed, "shader pipeline", feed.shaderView::close);
+        }
 
         TextureManager textureManager = feed.textureManager;
         feed.textureManager = null;
@@ -1307,6 +1310,7 @@ public final class ProjectionRenderManager {
         private final ProjectionCamera camera = new ProjectionCamera();
         private final PortalSide side;
         private final FeedTrace trace = new FeedTrace();
+        private final IrisCompatibility.ShaderView shaderView = IrisCompatibility.createShaderView();
         private ProjectionView view;
         private ProjectionAlignment alignment;
         private Vec3 cameraPosition;

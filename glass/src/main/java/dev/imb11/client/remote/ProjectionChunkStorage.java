@@ -14,6 +14,7 @@ import net.minecraft.world.level.chunk.status.ChunkStatus;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
+import java.util.function.LongConsumer;
 
 public final class ProjectionChunkStorage {
     private final ClientChunkCache cache;
@@ -39,6 +40,32 @@ public final class ProjectionChunkStorage {
     public boolean retained(ChunkPos pos) {
         Entry entry = chunks.get(pos.pack());
         return entry != null && entry.references > 0;
+    }
+
+    public void forEachReadyChunk(ChunkPos center, int radius, LongConsumer consumer) {
+        for (Map.Entry<Long, Entry> entry : chunks.entrySet()) {
+            if (entry.getValue().references <= 0 || entry.getValue().chunk == null) {
+                continue;
+            }
+            int chunkX = ChunkPos.getX(entry.getKey());
+            int chunkZ = ChunkPos.getZ(entry.getKey());
+            if (Math.abs(chunkX - center.x()) > radius || Math.abs(chunkZ - center.z()) > radius) {
+                continue;
+            }
+            boolean ready = true;
+            for (int x = chunkX - 1; x <= chunkX + 1 && ready; x++) {
+                for (int z = chunkZ - 1; z <= chunkZ + 1; z++) {
+                    if (cache.getChunk(x, z, ChunkStatus.FULL, false) == null
+                            || !cache.getLightEngine().lightOnInColumn(SectionPos.asLong(x, 0, z))) {
+                        ready = false;
+                        break;
+                    }
+                }
+            }
+            if (ready) {
+                consumer.accept(entry.getKey());
+            }
+        }
     }
 
     public boolean vanilla(ChunkPos pos) {

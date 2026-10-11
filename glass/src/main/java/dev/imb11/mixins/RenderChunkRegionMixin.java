@@ -23,6 +23,11 @@ abstract class RenderChunkRegionMixin implements ProjectionRenderRegion {
         glass$hiddenTerrainBlock = position == null ? null : position.immutable();
     }
 
+    @Override
+    public boolean glass$isProjection() {
+        return glass$hiddenTerrainBlock != null;
+    }
+
     @Inject(method = "getBlockState", at = @At("HEAD"), cancellable = true)
     private void glass$hideProjectionTerminalState(
             BlockPos position,

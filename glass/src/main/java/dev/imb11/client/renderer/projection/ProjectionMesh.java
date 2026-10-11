@@ -11,6 +11,7 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import dev.imb11.client.compat.IrisCompatibility;
 import net.minecraft.client.Minecraft;
 import org.joml.Matrix4f;
 import org.joml.Vector3f;
@@ -46,7 +47,8 @@ public final class ProjectionMesh implements AutoCloseable {
         var indices = RenderSystem.getSequentialBuffer(PrimitiveTopology.QUADS);
         var indexBuffer = indices.getBuffer(indexCount);
         var transforms = RenderSystem.getDynamicUniforms().writeTransform(pose, new Vector4f(1), new Vector3f(), new Matrix4f());
-        try (var pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "GLASS projection surface",
+        try (var ignored = IrisCompatibility.preserveSamplers(textures.size());
+             var pass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "GLASS projection surface",
                 target.getColorTextureView(), Optional.empty(), target.getDepthTextureView(), OptionalDouble.empty())) {
             pass.setPipeline(pipeline);
             RenderSystem.bindDefaultUniforms(pass);

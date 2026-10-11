@@ -2,6 +2,9 @@ package dev.imb11.mixins;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
 import dev.imb11.client.renderer.block.ProjectorBlockEntityRenderer;
+import dev.imb11.client.compat.IrisCompatibility;
+import net.minecraft.client.Camera;
+import net.minecraft.client.renderer.state.GameRenderState;
 import dev.imb11.client.renderer.projection.ProjectionRenderContext;
 import dev.imb11.client.renderer.projection.ProjectionRenderManager;
 import dev.imb11.client.renderer.projection.ProjectionSurfaceRenderer;
@@ -17,6 +20,20 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(GameRenderer.class)
 abstract class GameRendererMixin {
+    @Inject(method = "mainCamera", at = @At("HEAD"), cancellable = true)
+    private void glass$shaderCamera(CallbackInfoReturnable<Camera> callbackInfo) {
+        if (IrisCompatibility.shaderView() != null) {
+            callbackInfo.setReturnValue(IrisCompatibility.shaderView().camera());
+        }
+    }
+
+    @Inject(method = "gameRenderState", at = @At("HEAD"), cancellable = true)
+    private void glass$shaderRenderState(CallbackInfoReturnable<GameRenderState> callbackInfo) {
+        if (IrisCompatibility.shaderView() != null) {
+            callbackInfo.setReturnValue(IrisCompatibility.shaderView().renderState());
+        }
+    }
+
     @Inject(method = {"lightmap", "levelLightmap"}, at = @At("HEAD"), cancellable = true)
     private void glass$projectionProjectionLightmap(CallbackInfoReturnable<GpuTextureView> callbackInfo) {
         ProjectionLightmap lightTexture = ProjectionRenderContext.lightTexture();
