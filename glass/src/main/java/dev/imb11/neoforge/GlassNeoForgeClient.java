@@ -66,8 +66,7 @@ public final class GlassNeoForgeClient {
 
     private static void registerShaders(RegisterShadersEvent event) {
         try {
-            GlassClient.registerProjectionShader((id, format, onLoaded) ->
-                    event.registerShader(new ShaderInstance(event.getResourceProvider(), id, format), onLoaded));
+            GlassClient.loadProjectionShaders((id, format) -> new ShaderInstance(event.getResourceProvider(), id, format));
         } catch (IOException exception) {
             throw new UncheckedIOException("Unable to load GLASS projection shader", exception);
         }

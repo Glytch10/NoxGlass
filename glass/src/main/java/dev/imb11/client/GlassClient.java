@@ -10,13 +10,17 @@ import dev.imb11.sync.packets.S2CChannelSnapshotPacket;
 import dev.imb11.sync.packets.S2CSourcePosePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
 public final class GlassClient {
     private static volatile ClientLevel activeLevel;
+    private static final List<ShaderInstance> PROJECTION_SHADERS = new ArrayList<>();
 
     private GlassClient() {
     }
@@ -27,7 +31,19 @@ public final class GlassClient {
         RemoteSceneClientManager.registerReceivers();
     }
 
-    public static void registerProjectionShader(ShaderRegistrar registrar) throws IOException {
+    public static void loadProjectionShaders(ShaderFactory factory) throws IOException {
+        for (ShaderInstance shader : PROJECTION_SHADERS) {
+            shader.close();
+        }
+        PROJECTION_SHADERS.clear();
+        registerProjectionShader((id, format, onLoaded) -> {
+            ShaderInstance shader = factory.create(id, format);
+            PROJECTION_SHADERS.add(shader);
+            onLoaded.accept(shader);
+        });
+    }
+
+    private static void registerProjectionShader(ShaderRegistrar registrar) throws IOException {
         ProjectionRenderManager.reset();
         RemoteSceneClientManager.onResourceReload();
         ProjectorBlockEntityRenderer.reset();

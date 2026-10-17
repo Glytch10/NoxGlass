@@ -18,6 +18,8 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientChunkEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.CoreShaderRegistrationCallback;
+import net.fabricmc.fabric.impl.client.rendering.FabricShaderProgram;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderers;
@@ -30,7 +32,8 @@ public final class GlassFabricClient implements ClientModInitializer {
         BlockEntityRenderers.register(TerminalBlockEntity.BLOCK_ENTITY_TYPE, TerminalBlockEntityRenderer::new);
         BlockRenderLayerMap.INSTANCE.putBlock(GBlocks.PROJECTOR, RenderType.cutout());
         BlockRenderLayerMap.INSTANCE.putBlock(GBlocks.POWERABLE_GLASS, RenderType.cutout());
-        CoreShaderRegistrationCallback.EVENT.register(context -> GlassClient.registerProjectionShader(context::register));
+        CoreShaderRegistrationCallback.EVENT.register(context -> GlassClient.loadProjectionShaders((id, format) ->
+                new FabricShaderProgram(Minecraft.getInstance().getResourceManager(), id, format)));
         ClientPlayConnectionEvents.INIT.register((handler, client) -> GlassClient.clearConnection());
         ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> GlassClient.clearConnection());
         ClientTickEvents.START_CLIENT_TICK.register(GlassClient::tick);
