@@ -1,5 +1,6 @@
 package dev.imb11.sync.remote;
 
+import com.mojang.logging.LogUtils;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.Packet;
@@ -8,8 +9,10 @@ import net.minecraft.network.protocol.game.*;
 import net.minecraft.resources.Identifier;
 
 import java.util.List;
+import org.slf4j.Logger;
 
 public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long sequence, List<EntityMessage> messages) implements CustomPacketPayload {
+    private static final Logger LOGGER = LogUtils.getLogger();
     public static final int MAX_MESSAGES = 128;
     public static final Type<S2CRemoteEntitiesPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_entities"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteEntitiesPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteEntitiesPacket::write, S2CRemoteEntitiesPacket::read);
@@ -37,7 +40,7 @@ public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long se
 
     public S2CRemoteEntitiesPacket {
         messages = List.copyOf(messages);
-        if (sequence < 0L || messages.isEmpty() || messages.size() > MAX_MESSAGES) {
+        if (sequence < 0L || messages.size() > MAX_MESSAGES) {
             throw new IllegalArgumentException("invalid remote entity batch");
         }
     }
@@ -48,6 +51,10 @@ public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long se
     }
 
     public static boolean supports(Packet<?> packet) {
+        if (packet instanceof ClientboundSetEquipmentPacket equipment && equipment.getSlots().isEmpty()) {
+            return false;
+        }
+
         return ENTRIES.stream().anyMatch(entry -> entry.packetClass().isInstance(packet));
     }
 
@@ -65,7 +72,11 @@ public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long se
                 throw new IllegalArgumentException("unsupported remote entity packet");
             }
             buf.writeVarInt(index);
+            int lengthIndex = buf.writerIndex();
+            buf.writeInt(0);
+            int start = buf.writerIndex();
             ENTRIES.get(index).write(buf, message.packet());
+            buf.setInt(lengthIndex, buf.writerIndex() - start);
         }
     }
 
@@ -83,7 +94,25 @@ public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long se
             if (type < 0 || type >= ENTRIES.size()) {
                 throw new IllegalArgumentException("invalid remote entity packet type");
             }
-            messages.add(new EntityMessage(entityId, ENTRIES.get(type).codec().decode(buf)));
+            int length = buf.readInt();
+            if (length < 0 || length > buf.readableBytes()) {
+                throw new IllegalArgumentException("invalid remote entity packet length");
+            }
+            int end = buf.readerIndex() + length;
+            Packet<?> packet;
+            try {
+                packet = ENTRIES.get(type).codec().decode(buf);
+            } catch (RuntimeException exception) {
+                LOGGER.warn("Skipping undecodable remote entity packet {} for entity {}", ENTRIES.get(type).packetClass().getSimpleName(), entityId, exception);
+                buf.readerIndex(end);
+                continue;
+            }
+            if (buf.readerIndex() != end) {
+                LOGGER.warn("Skipping remote entity packet {} for entity {} with mismatched length", ENTRIES.get(type).packetClass().getSimpleName(), entityId);
+                buf.readerIndex(end);
+                continue;
+            }
+            messages.add(new EntityMessage(entityId, packet));
         }
         return new S2CRemoteEntitiesPacket(subscription, sequence, messages);
     }
