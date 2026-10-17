@@ -77,6 +77,7 @@ publishMods {
 
         modrinth("modrinth$targetName") {
             from(options.get())
+            version = "$releaseVersion-$loader".takeIf { it.length <= 32 } ?: "${modData.version}-${if (loader == "fabric") "fabric" else "neo"}"
             projectId = modData.required("publish.modrinth")
             accessToken = providers.environmentVariable("MODRINTH_TOKEN")
             minecraftVersions.add(minecraftVersion)

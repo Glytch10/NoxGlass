@@ -10,6 +10,11 @@ on:
         description: tag
         type: string
         required: true
+      platforms:
+        description: platforms
+        type: choice
+        default: all
+        options: [all, modrinth, curseforge]
 
 permissions:
   contents: write
@@ -46,6 +51,12 @@ jobs:
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_PLATFORMS: ${{ inputs.platforms || 'all' }}
         run: |
           test "$RELEASE_MOD" = glass
-          GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" bash ./gradlew --no-daemon --build-cache :glass:publishMods -x :glass:publishGithub -Pglass.publishMinecraftVersions=1.21.1 -Pglass.publishType=beta
+          skip=(-x :glass:publishGithub)
+          case "$RELEASE_PLATFORMS" in
+            modrinth) skip+=(-x :glass:publishCurseforge1_21_1Fabric -x :glass:publishCurseforge1_21_1NeoForge) ;;
+            curseforge) skip+=(-x :glass:publishModrinth1_21_1Fabric -x :glass:publishModrinth1_21_1NeoForge) ;;
+          esac
+          GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" bash ./gradlew --no-daemon --build-cache :glass:publishMods "${skip[@]}" -Pglass.publishMinecraftVersions=1.21.1 -Pglass.publishType=beta
