@@ -391,7 +391,7 @@ public final class ProjectionRenderManager {
         }
     }
 
-    public static void renderBeforeMain(GameRenderer gameRenderer, DeltaTracker deltaTracker) {
+    public static void renderBeforeMain(GameRenderer gameRenderer, DeltaTracker deltaTracker, Matrix4f levelProjection) {
         if (ProjectionRenderContext.isActive()) {
             return;
         }
@@ -418,7 +418,7 @@ public final class ProjectionRenderManager {
         RenderTarget mainTarget = gameRenderer.mainRenderTarget();
         Camera viewerCamera = gameRenderer.mainCamera();
         Vec3 viewerPosition = viewerCamera.position();
-        Matrix4f mainProjection = new Matrix4f(gameRenderer.gameRenderState().levelRenderState.cameraRenderState.projectionMatrix);
+        Matrix4f mainProjection = new Matrix4f(levelProjection);
         Matrix4f mainModelView = RenderSystem.getModelViewMatrixCopy();
         boolean initializedFeedThisFrame = false;
         for (ProjectionFeed feed : List.copyOf(FEEDS.values())) {

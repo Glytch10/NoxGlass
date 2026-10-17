@@ -12,6 +12,8 @@ import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.renderer.GameRenderer;
 import dev.imb11.client.renderer.projection.ProjectionLightmap;
 import com.mojang.blaze3d.textures.GpuTextureView;
+import com.llamalad7.mixinextras.sugar.Local;
+import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -50,9 +52,9 @@ abstract class GameRendererMixin {
         }
     }
 
-    @Inject(method = "renderLevel", at = @At("HEAD"))
-    private void glass$renderProjectionBeforeMain(DeltaTracker deltaTracker, CallbackInfo callbackInfo) {
-        ProjectionRenderManager.renderBeforeMain((GameRenderer) (Object) this, deltaTracker);
+    @Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;setProjectionMatrix(Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lcom/mojang/blaze3d/ProjectionType;)V", ordinal = 0))
+    private void glass$renderProjectionBeforeMain(DeltaTracker deltaTracker, CallbackInfo callbackInfo, @Local Matrix4f projectionMatrix) {
+        ProjectionRenderManager.renderBeforeMain((GameRenderer) (Object) this, deltaTracker, projectionMatrix);
     }
 
     @Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;render(Lcom/mojang/blaze3d/resource/GraphicsResourceAllocator;Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/renderer/state/level/CameraRenderState;Lorg/joml/Matrix4fc;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;Lorg/joml/Vector4f;Z)V", shift = At.Shift.AFTER))
