@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.4.4] - 2026-10-17
+
+### Added
+
+- Added support for 26.3 NeoForge. ([#226](https://github.com/IMB11-Mods/JavaEditionMods/pull/226))
+- Added support for 26.2 NeoForge. ([#336](https://github.com/IMB11-Mods/JavaEditionMods/pull/336))
+
+### Changed
+
+- Moved platform specific code to [MRU](http://modrinth.com/mod/mru) which is now a required dependency. ([#226](https://github.com/IMB11-Mods/JavaEditionMods/pull/226))
+
 ## [1.4.2] - 2026-06-03
 
 - Rendering fixes.
