@@ -5,6 +5,7 @@ import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.ProjectionType;
 import dev.imb11.client.compat.IrisCompatibility;
 import dev.imb11.mixins.LevelRendererBufferAccessor;
+import dev.imb11.platform.LevelRenderContexts;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.SectionUpdateTracker;
@@ -367,10 +368,12 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         var terrainFog = fog.getBuffer(FogRenderer.FogMode.WORLD);
         var modelView = RenderSystem.getModelViewStack();
         modelView.pushMatrix();
-        modelView.mul(camera.viewRotationMatrix);
-        access.glass$submitFeatures(levelState, access.glass$submitNodeStorage(), false);
-        FeatureRenderDispatcher.PreparedFrame featureFrame = features.prepareFrame(access.glass$submitNodeStorage());
+        FeatureRenderDispatcher.PreparedFrame featureFrame = null;
         try {
+            modelView.mul(camera.viewRotationMatrix);
+            LevelRenderContexts.prepare(this, levelState, access.glass$submitNodeStorage());
+            access.glass$submitFeatures(levelState, access.glass$submitNodeStorage(), false);
+            featureFrame = features.prepareFrame(access.glass$submitNodeStorage());
             var frame = new FrameGraphBuilder();
             var target = minecraft.gameRenderer.mainRenderTarget();
             targets.main = frame.importExternal("main", target);
@@ -385,8 +388,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
             useProjection(frame, targets, "glass_sky_projection", skyProjection);
             access.glass$skyPass(frame, camera, terrainFog);
             useProjection(frame, targets, "glass_scene_projection", sceneProjection);
-            access.glass$mainPass(frame, featureFrame, terrainFog, levelState, Profiler.get(),
-                    prepareChunkRenders(camera.viewRotationMatrix));
+            ChunkSectionsToRender chunks = prepareChunkRenders(camera.viewRotationMatrix);
+            LevelRenderContexts.setSectionsToRender(this, chunks);
+            access.glass$mainPass(frame, featureFrame, terrainFog, levelState, Profiler.get(), chunks);
             if (state.optionsRenderState.cloudStatus != CloudStatus.OFF && ARGB.alpha(levelState.cloudColor) > 0) {
                 access.glass$cloudsPass(frame, state.optionsRenderState.cloudStatus, camera.pos, levelState.gameTime,
                         delta.getGameTimeDeltaPartialTick(false), levelState.cloudColor, levelState.cloudHeight,
@@ -396,7 +400,9 @@ public class ProjectionLevelRenderer extends LevelRenderer {
             IrisCompatibility.renderWithPipeline(this, () -> frame.execute(GraphicsResourceAllocator.UNPOOLED));
         } finally {
             targets.clear();
-            featureFrame.close();
+            if (featureFrame != null) {
+                featureFrame.close();
+            }
             modelView.popMatrix();
             levelState.reset();
         }
