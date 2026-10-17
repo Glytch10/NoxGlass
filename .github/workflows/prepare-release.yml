@@ -7,7 +7,7 @@ on:
         description: project
         type: choice
         required: true
-        options: [sounds, mru, shields, fog, glass]
+        options: [glass]
       version:
         description: version
         type: string
@@ -32,12 +32,12 @@ concurrency:
 
 jobs:
   prepare:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/glass/1.21.1'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          ref: glass/1.21.1
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -63,7 +63,7 @@ jobs:
       - name: Build and validate publishing
         env:
           RELEASE_PROJECT: ${{ inputs.project }}
-        run: bash ./gradlew --no-daemon --build-cache ":$RELEASE_PROJECT:publishMods" -PpublishDryRun=true
+        run: bash ./gradlew --no-daemon --build-cache ":$RELEASE_PROJECT:publishMods" -x ":$RELEASE_PROJECT:publishGithub" -PpublishDryRun=true -Pglass.publishMinecraftVersions=1.21.1 -Pglass.publishType=beta
       - name: Commit and push release tag
         if: ${{ !inputs.dry_run }}
         env:
@@ -71,14 +71,14 @@ jobs:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_HEAD: ${{ steps.release.outputs.head }}
         run: |
-          remote_head=$(git ls-remote origin refs/heads/main | cut -f1)
-          test "$remote_head" = "$RELEASE_HEAD" || { echo 'main advanced; rerun preparation.'; exit 1; }
+          remote_head=$(git ls-remote origin refs/heads/glass/1.21.1 | cut -f1)
+          test "$remote_head" = "$RELEASE_HEAD" || { echo 'glass/1.21.1 advanced; rerun preparation.'; exit 1; }
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -- "$RELEASE_PROJECT/mod.properties" "$RELEASE_PROJECT/CHANGELOG.md"
           git commit -m "Release $RELEASE_TAG"
           git tag "$RELEASE_TAG"
-          git push --atomic origin HEAD:refs/heads/main "refs/tags/$RELEASE_TAG"
+          git push --atomic origin HEAD:refs/heads/glass/1.21.1 "refs/tags/$RELEASE_TAG"
       - name: Start publishing
         if: ${{ !inputs.dry_run }}
         env:

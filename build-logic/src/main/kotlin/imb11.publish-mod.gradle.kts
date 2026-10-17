@@ -19,9 +19,9 @@ val releaseChangelog = providers.fileContents(layout.projectDirectory.file("CHAN
     require(notes.isNotBlank()) { "Empty changelog section for ${modData.id} ${modData.version}" }
     notes
 }
-val publishMinecraftVersions = providers.gradleProperty("publishMinecraftVersions").orNull
+val publishMinecraftVersions = providers.gradleProperty("${modData.id}.publishMinecraftVersions").orNull
     ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
-val publishType = providers.gradleProperty("publishType").orNull
+val publishType = providers.gradleProperty("${modData.id}.publishType").orNull
 val targetProjects = childProjects.values.sortedBy { it.name }.onEach { node ->
     evaluationDependsOn(node.path)
 }.filter { publishMinecraftVersions.isEmpty() || it.minecraftVersion in publishMinecraftVersions }

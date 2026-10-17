@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added support for 1.21.1 for Fabric & NeoForge
+- Added support for Sable + Create: Aeronautics
+
 ## [1.0.0]
 
 ### Added

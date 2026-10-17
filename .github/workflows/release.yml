@@ -3,10 +3,6 @@ name: Release
 on:
   push:
     tags:
-      - mru/v*
-      - sounds/v*
-      - shields/v*
-      - fog/v*
       - glass/v*
   workflow_dispatch:
     inputs:
@@ -34,8 +30,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           case "$RELEASE_TAG" in
-            sounds/v*|mru/v*|shields/v*|fog/v*|glass/v*) ;;
-            *) echo 'Expected a sounds/v, mru/v, shields/v, fog/v, or glass/v release tag'; exit 1 ;;
+            glass/v*) ;;
+            *) echo 'Expected a glass/v release tag'; exit 1 ;;
           esac
           test "$(git rev-parse HEAD)" = "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")"
           echo "RELEASE_MOD=${RELEASE_TAG%%/*}" >> "$GITHUB_ENV"
@@ -44,15 +40,12 @@ jobs:
           distribution: temurin
           java-version: '25'
       - uses: gradle/actions/setup-gradle@v6
-      - name: Build and publish selected mods
+      - name: Build and publish glass for 1.21.1
         env:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           MODRINTH_TOKEN: ${{ secrets.MODRINTH_TOKEN }}
           CURSEFORGE_TOKEN: ${{ secrets.CURSEFORGE_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          case "$RELEASE_MOD" in
-            mru|sounds|shields|fog|glass) task=":$RELEASE_MOD:publishMods" ;;
-            *) exit 1 ;;
-          esac
-          GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" bash ./gradlew --no-daemon --build-cache "$task"
+          test "$RELEASE_MOD" = glass
+          GITHUB_REF_TYPE=tag GITHUB_REF_NAME="$RELEASE_TAG" GITHUB_SHA="$(git rev-parse HEAD)" bash ./gradlew --no-daemon --build-cache :glass:publishMods -x :glass:publishGithub -Pglass.publishMinecraftVersions=1.21.1 -Pglass.publishType=beta
