@@ -28,30 +28,7 @@ const propertiesPath = `${project}/mod.properties`;
 const properties = readFileSync(propertiesPath, 'utf8');
 const current = properties.match(/^mod\.version=(.+)$/m)?.[1].trim();
 if (!current) throw new Error('Missing mod.version');
-const currentCore = current.split(/[+-]/)[0].split('.').map(Number);
-const nextCore = version.split(/[+-]/)[0].split('.').map(Number);
-const difference = nextCore.map((value, index) => value - currentCore[index]).find(value => value !== 0);
-if (current === version || difference < 0) throw new Error(`Version must advance from ${current}`);
-if (!difference) {
-  const previousPre = current.split('+')[0].split('-').slice(1).join('-');
-  const nextPre = version.split('+')[0].split('-').slice(1).join('-');
-  const comparePre = (left, right) => {
-    const a = left.split('.');
-    const b = right.split('.');
-    for (let index = 0; index < Math.max(a.length, b.length); index++) {
-      if (a[index] === undefined) return -1;
-      if (b[index] === undefined) return 1;
-      if (a[index] === b[index]) continue;
-      const numericA = /^\d+$/.test(a[index]);
-      const numericB = /^\d+$/.test(b[index]);
-      if (numericA && numericB) return BigInt(a[index]) > BigInt(b[index]) ? 1 : -1;
-      if (numericA !== numericB) return numericA ? -1 : 1;
-      return a[index] > b[index] ? 1 : -1;
-    }
-    return 0;
-  };
-  if (!previousPre || (nextPre && comparePre(nextPre, previousPre) <= 0)) throw new Error(`Version must advance from ${current}`);
-}
+if (current === version) throw new Error(`Version must differ from ${current}`);
 const remote = git('remote', 'get-url', 'origin');
 const repository = process.env.GITHUB_REPOSITORY ?? remote.match(/github\.com[:/](.+?)(?:\.git)?$/)?.[1];
 if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Cannot determine GitHub repository');

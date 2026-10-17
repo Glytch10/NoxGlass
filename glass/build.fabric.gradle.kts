@@ -11,7 +11,6 @@ dependencies {
     "modCompileOnly"(mcLibrary("iris-fabric"))
     compileOnly(mcLibrary("sable-companion"))
     "modCompileOnly"(mcLibrary("sable-fabric"))
-    "modLocalRuntime"(mcLibrary("sable-fabric"))
     if (providers.gradleProperty("with_sodium").isPresent) {
         "modLocalRuntime"(mcLibrary("sodium-fabric"))
     }
