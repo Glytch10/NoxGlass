@@ -14,8 +14,6 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.SectionPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
@@ -37,7 +35,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 public class ProjectorBlockEntity extends PlatformBlockEntity implements ExtendedMenuProvider<BlockPos> {
-    public static BlockEntityType<ProjectorBlockEntity> BLOCK_ENTITY_TYPE = new BlockEntityType<>(ProjectorBlockEntity::new, java.util.Set.of(GBlocks.PROJECTOR));
+    public static BlockEntityType<ProjectorBlockEntity> BLOCK_ENTITY_TYPE = BlockEntityType.Builder.of(ProjectorBlockEntity::new, GBlocks.PROJECTOR).build(null);
     public boolean active = false;
     private String channel = "";
 
@@ -55,8 +53,8 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
 
     public static void tick(Level world, BlockPos pos, BlockState state, ProjectorBlockEntity be) {
         boolean wasActive = be.active;
-        be.active = world.isClientSide() ? state.getValue(ProjectorBlock.POWERED) : world.hasNeighborSignal(pos);
-        if (!world.isClientSide() && state.getValue(ProjectorBlock.POWERED) != be.active) {
+        be.active = world.isClientSide ? state.getValue(ProjectorBlock.POWERED) : world.hasNeighborSignal(pos);
+        if (!world.isClientSide && state.getValue(ProjectorBlock.POWERED) != be.active) {
             world.setBlock(pos, state.setValue(ProjectorBlock.POWERED, be.active), Block.UPDATE_CLIENTS);
         }
         if (wasActive != be.active) {
@@ -68,27 +66,27 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
             be.clientRevealDistance = -1;
         }
         be.tickProjection(world);
-        if (!world.isClientSide() && be.isProjectionVisible()) {
+        if (!world.isClientSide && be.isProjectionVisible()) {
             ChannelManagerPersistence.get(world).recordProjection(be.channel);
         }
     }
 
     @Override
-    public void saveAdditional(ValueOutput tag) {
+    public void saveAdditional(CompoundTag tag, HolderLookup.Provider registryLookup) {
         tag.putString("channel", channel);
         tag.putBoolean("active", active);
         tag.putInt("targetDistance", revealDistance);
 
-        super.saveAdditional(tag);
+        super.saveAdditional(tag, registryLookup);
     }
 
     @Override
-    public void loadAdditional(ValueInput tag) {
+    public void loadAdditional(CompoundTag tag, HolderLookup.Provider registryLookup) {
         boolean wasActive = active;
         String previousChannel = channel;
-        channel = tag.getStringOr("channel", "");
-        active = tag.getBooleanOr("active", false);
-        revealDistance = tag.getIntOr("targetDistance", -1);
+        channel = tag.getString("channel");
+        active = tag.getBoolean("active");
+        revealDistance = tag.contains("targetDistance") ? tag.getInt("targetDistance") : -1;
         if (!wasActive && active || !previousChannel.equals(channel)) {
             clientRevealDistance = -1;
             clientProjectionReady = false;
@@ -97,7 +95,7 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
             ProjectorPowerTrace.changed(level, worldPosition, channel, "block-entity-sync", wasActive, active, getRevealDistance());
         }
 
-        super.loadAdditional(tag);
+        super.loadAdditional(tag, registryLookup);
     }
 
     public String getChannel() {
@@ -111,7 +109,7 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
         }
         this.channel = value;
         setChanged();
-        if (level != null && !level.isClientSide()) {
+        if (level != null && !level.isClientSide) {
             BlockState state = getBlockState();
             level.sendBlockUpdated(worldPosition, state, state, Block.UPDATE_CLIENTS);
         }
@@ -154,7 +152,7 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
         }
         Direction facing = getBlockState().getValue(ProjectorBlock.FACING);
         ensureProjectionSurface(world, facing);
-        if (world.isClientSide()) {
+        if (world.isClientSide) {
             if (active) {
                 if (clientProjectionReady && clientRevealDistance < projectionSurface.completedRevealDistance()) {
                     clientRevealDistance++;
@@ -191,7 +189,7 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
                     sound,
                     SoundSource.BLOCKS,
                     0.6F,
-                    0.8F + world.getRandom().nextFloat() * 0.4F,
+                    0.8F + world.random.nextFloat() * 0.4F,
                     false
             );
         }
@@ -276,7 +274,7 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
     }
 
     public int getRevealDistance() {
-        return level != null && level.isClientSide() ? clientRevealDistance : revealDistance;
+        return level != null && level.isClientSide ? clientRevealDistance : revealDistance;
     }
 
     public boolean isProjectionVisible() {

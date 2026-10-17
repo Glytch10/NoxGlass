@@ -619,7 +619,7 @@ public final class RemoteSceneClientManager {
         @Override
         public void apply(RemoteSceneHandle state) {
             state.scene.applyBlockEntities(state.id, updates.stream()
-                    .filter(update -> state.updateCurrent(ChunkPos.containing(update.getPos()), sequence))
+                    .filter(update -> state.updateCurrent(new ChunkPos(update.getPos()), sequence))
                     .toList());
         }
     }

@@ -7,6 +7,7 @@ import dev.imb11.client.remote.ProjectionChunkStorage;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.world.level.ChunkPos;
@@ -43,12 +44,12 @@ abstract class ClientChunkCacheMixin implements ProjectionChunkAccess {
     }
 
     @Inject(method = "replaceWithPacketData", at = @At("HEAD"), cancellable = true)
-    private void glass$updateRetainedChunk(int x, int z, FriendlyByteBuf data, java.util.Map<net.minecraft.world.level.levelgen.Heightmap.Types, long[]> heightmaps,
+    private void glass$updateRetainedChunk(int x, int z, FriendlyByteBuf data, CompoundTag heightmaps,
                                          Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> blockEntities,
                                          CallbackInfoReturnable<LevelChunk> cir) {
         if (glass$chunks.contains(x, z)) {
             LevelChunk chunk = glass$chunks.replace(level, x, z, data, heightmaps, blockEntities, true);
-            SodiumCompatibility.onChunkReadyToRender(level, new ChunkPos(x, z));
+            SodiumCompatibility.onChunkLoaded(level, new ChunkPos(x, z));
             cir.setReturnValue(chunk);
         }
     }

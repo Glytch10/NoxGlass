@@ -21,7 +21,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
-import net.minecraft.world.level.block.state.properties.EnumProperty;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
@@ -30,7 +30,7 @@ import org.jetbrains.annotations.Nullable;
 public class ProjectorBlock extends BaseEntityBlock {
 
     public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
-    public static final EnumProperty<Direction> FACING = BlockStateProperties.FACING;
+    public static final DirectionProperty FACING = BlockStateProperties.FACING;
 
     public ProjectorBlock(Properties settings) {
         super(settings);
@@ -54,21 +54,21 @@ public class ProjectorBlock extends BaseEntityBlock {
     }
 
     @Override
-    public void neighborChanged(BlockState state, Level world, BlockPos pos, Block sourceBlock, net.minecraft.world.level.redstone.Orientation orientation, boolean notify) {
-        if (!world.isClientSide()) {
+    public void neighborChanged(BlockState state, Level world, BlockPos pos, Block sourceBlock, BlockPos sourcePos, boolean notify) {
+        if (!world.isClientSide) {
             boolean powered = world.hasNeighborSignal(pos);
             if (state.getValue(POWERED) != powered) {
                 world.setBlock(pos, state.setValue(POWERED, powered), Block.UPDATE_CLIENTS);
             }
         }
 
-        super.neighborChanged(state, world, pos, sourceBlock, orientation, notify);
+        super.neighborChanged(state, world, pos, sourceBlock, sourcePos, notify);
     }
 
     @Override
     public InteractionResult useWithoutItem(BlockState state, Level world, BlockPos pos, Player player, BlockHitResult hit) {
 
-        if (world.isClientSide()) {
+        if (world.isClientSide) {
             return InteractionResult.PASS;
         }
 

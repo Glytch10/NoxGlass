@@ -5,7 +5,7 @@ import dev.imb11.sync.remote.RemoteSubscriptionId;
 import dev.imb11.sync.remote.S2CRemoteUnavailablePacket;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
-import dev.imb11.client.renderer.projection.ProjectionLightmap;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.world.level.ChunkPos;
 import org.jetbrains.annotations.Nullable;
 
@@ -48,7 +48,7 @@ public final class RemoteSceneHandle {
         return isActive() && scene != null ? scene.level() : null;
     }
 
-    public @Nullable ProjectionLightmap lightTexture() {
+    public @Nullable LightTexture lightTexture() {
         return isActive() && scene != null ? scene.lightTexture() : null;
     }
 
@@ -90,21 +90,21 @@ public final class RemoteSceneHandle {
 
     boolean withinGrant(ChunkPos pos, int padding) {
         return grantedCenter != null
-                && Math.abs(pos.x() - grantedCenter.x()) <= grantedRadius + padding
-                && Math.abs(pos.z() - grantedCenter.z()) <= grantedRadius + padding;
+                && Math.abs(pos.x - grantedCenter.x) <= grantedRadius + padding
+                && Math.abs(pos.z - grantedCenter.z) <= grantedRadius + padding;
     }
 
     void recordControl(ChunkPos chunk, long sequence, boolean load) {
-        chunkControls.put(chunk.pack(), new Control(sequence, load));
+        chunkControls.put(chunk.toLong(), new Control(sequence, load));
     }
 
     boolean controlCurrent(ChunkPos chunk, long sequence, boolean load) {
-        Control control = chunkControls.get(chunk.pack());
+        Control control = chunkControls.get(chunk.toLong());
         return control != null && control.sequence == sequence && control.load == load;
     }
 
     boolean updateCurrent(ChunkPos chunk, long sequence) {
-        Control control = chunkControls.get(chunk.pack());
+        Control control = chunkControls.get(chunk.toLong());
         return control == null || sequence >= control.sequence;
     }
 

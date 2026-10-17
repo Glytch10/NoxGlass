@@ -45,7 +45,7 @@ public final class ProjectorActivationTrace {
         ProjectionSurface surface = projector.getProjectionSurface();
         String message = "[GLASS projector] activation dimension={} pos={} channel={} powered={} poweredMs={} stage={} ready={} reveal={} faces={} bounds={} {}";
         Object[] details = {
-                projector.getLevel().dimension().identifier(), projector.getBlockPos().toShortString(), projector.getChannel(),
+                projector.getLevel().dimension().location(), projector.getBlockPos().toShortString(), projector.getChannel(),
                 powered, powered ? (now - state.poweredSince) / 1_000_000L : 0L, stage, ready, projector.getRevealDistance(),
                 surface == null ? 0 : surface.faces().size(), surface == null ? "none" : surface.renderBounds(),
                 feed == null ? "feed=none" : feed.diagnostics()

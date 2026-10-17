@@ -12,9 +12,8 @@ import net.minecraft.network.protocol.game.*;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityTypes;
-import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.PositionMoveRotation;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
@@ -51,24 +50,34 @@ final class RemoteSceneEntities {
                     }
                     continue;
                 }
-                if (packet instanceof ClientboundAddEntityPacket
+                if ((packet instanceof ClientboundAddEntityPacket || packet instanceof ClientboundAddExperienceOrbPacket)
                         && !owners.containsKey(id) && level == Minecraft.getInstance().level && level.getEntity(id) != null) {
                     vanillaEntities.add(id);
                 }
                 if (packet instanceof ClientboundAddEntityPacket spawn) {
                     if (owners.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(subscription) && level.getEntity(id) == null) {
                         Entity entity;
-                        if (spawn.getType() == EntityTypes.PLAYER) {
+                        if (spawn.getType() == EntityType.PLAYER) {
                             PlayerInfo info = Minecraft.getInstance().getConnection().getPlayerInfo(spawn.getUUID());
                             entity = new RemotePlayer(level, info == null ? new GameProfile(spawn.getUUID(), "Player") : info.getProfile());
                         } else {
-                            entity = spawn.getType().create(level, EntitySpawnReason.LOAD);
+                            entity = spawn.getType().create(level);
                         }
                         if (entity != null) {
                             entity.recreateFromPacket(spawn);
                             entity.setOldPosAndRot();
                             level.addEntity(entity);
                         }
+                    }
+                    continue;
+                }
+                if (packet instanceof ClientboundAddExperienceOrbPacket spawn) {
+                    if (owners.computeIfAbsent(id, ignored -> new LinkedHashSet<>()).add(subscription) && level.getEntity(id) == null) {
+                        ExperienceOrb entity = new ExperienceOrb(level, spawn.getX(), spawn.getY(), spawn.getZ(), spawn.getValue());
+                        entity.setId(spawn.getId());
+                        entity.syncPacketPositionCodec(spawn.getX(), spawn.getY(), spawn.getZ());
+                        entity.setOldPosAndRot();
+                        level.addEntity(entity);
                     }
                     continue;
                 }
@@ -87,26 +96,23 @@ final class RemoteSceneEntities {
                     if (movement.hasPosition()) {
                         Vec3 position = entity.getPositionCodec().decode(movement.getXa(), movement.getYa(), movement.getZa());
                         entity.getPositionCodec().setBase(position);
-                        if (movement.hasRotation()) {
-                            entity.moveOrInterpolateTo(position, movement.getYRot(), movement.getXRot());
-                        } else {
-                            entity.moveOrInterpolateTo(position);
-                        }
+                        entity.lerpTo(position.x, position.y, position.z,
+                                movement.hasRotation() ? movement.getyRot() * 360.0F / 256.0F : entity.lerpTargetYRot(),
+                                movement.hasRotation() ? movement.getxRot() * 360.0F / 256.0F : entity.lerpTargetXRot(), 3);
                     } else if (movement.hasRotation()) {
-                        entity.moveOrInterpolateTo(movement.getYRot(), movement.getXRot());
+                        entity.lerpTo(entity.lerpTargetX(), entity.lerpTargetY(), entity.lerpTargetZ(),
+                                movement.getyRot() * 360.0F / 256.0F, movement.getxRot() * 360.0F / 256.0F, 3);
                     }
                     entity.setOnGround(movement.isOnGround());
-                } else if (packet instanceof ClientboundEntityPositionSyncPacket sync) {
-                    entity.getPositionCodec().setBase(sync.values().position());
-                    applyPosition(entity, sync.values());
-                    entity.setOnGround(sync.onGround());
                 } else if (packet instanceof ClientboundTeleportEntityPacket teleport) {
-                    applyPosition(entity, PositionMoveRotation.calculateAbsolute(PositionMoveRotation.of(entity), teleport.change(), teleport.relatives()));
-                    entity.setOnGround(teleport.onGround());
+                    entity.syncPacketPositionCodec(teleport.getX(), teleport.getY(), teleport.getZ());
+                    entity.lerpTo(teleport.getX(), teleport.getY(), teleport.getZ(),
+                            teleport.getyRot() * 360.0F / 256.0F, teleport.getxRot() * 360.0F / 256.0F, 3);
+                    entity.setOnGround(teleport.isOnGround());
                 } else if (packet instanceof ClientboundRotateHeadPacket head) {
-                    entity.lerpHeadTo(head.getYHeadRot(), 3);
+                    entity.lerpHeadTo(head.getYHeadRot() * 360.0F / 256.0F, 3);
                 } else if (packet instanceof ClientboundSetEntityMotionPacket motion) {
-                    entity.lerpMotion(motion.movement());
+                    entity.lerpMotion(motion.getXa(), motion.getYa(), motion.getZa());
                 } else if (packet instanceof ClientboundSetEquipmentPacket equipment && entity instanceof LivingEntity living) {
                     equipment.getSlots().forEach(slot -> living.setItemSlot(slot.getFirst(), slot.getSecond()));
                 } else if (packet instanceof ClientboundUpdateAttributesPacket attributes && entity instanceof LivingEntity living) {
@@ -147,15 +153,6 @@ final class RemoteSceneEntities {
         } finally {
             applying--;
         }
-    }
-
-    private static void applyPosition(Entity entity, PositionMoveRotation values) {
-        if (entity.position().distanceToSqr(values.position()) > 4096.0) {
-            entity.snapTo(values.position(), values.yRot(), values.xRot());
-        } else {
-            entity.moveOrInterpolateTo(values.position(), values.yRot(), values.xRot());
-        }
-        entity.setDeltaMovement(values.deltaMovement());
     }
 
     void onVanillaAdded(Entity entity) {
@@ -201,7 +198,7 @@ final class RemoteSceneEntities {
             }
             if (!vehicle.getPassengers().equals(expected)) {
                 vehicle.ejectPassengers();
-                expected.forEach(passenger -> passenger.startRiding(vehicle, true, false));
+                expected.forEach(passenger -> passenger.startRiding(vehicle, true));
             }
         });
     }

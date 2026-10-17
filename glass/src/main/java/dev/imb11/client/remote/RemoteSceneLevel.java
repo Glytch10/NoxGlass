@@ -2,22 +2,24 @@ package dev.imb11.client.remote;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
-import net.minecraft.client.renderer.extract.LevelExtractor;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.core.Holder;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.profiling.ProfilerFiller;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.dimension.DimensionType;
 
+import java.util.function.Supplier;
 
 final class RemoteSceneLevel extends ClientLevel {
     RemoteSceneLevel(ClientPacketListener connection, ClientLevelData data, ResourceKey<Level> dimension,
-                     Holder<DimensionType> type, int viewDistance,
-                     LevelExtractor extractor, boolean debug, long seed, int seaLevel) {
-        super(connection, data, dimension, type, viewDistance, 0, extractor, debug, seed, seaLevel);
+                     Holder<DimensionType> type, int viewDistance, Supplier<ProfilerFiller> profiler,
+                     LevelRenderer renderer, boolean debug, long seed) {
+        super(connection, data, dimension, type, viewDistance, 0, profiler, renderer, debug, seed);
     }
 
     void tickVisualBlockEntities() {
@@ -29,7 +31,7 @@ final class RemoteSceneLevel extends ClientLevel {
     }
 
     @Override
-    public void addParticle(ParticleOptions particle, boolean force, boolean alwaysShow, double x, double y, double z, double dx, double dy, double dz) {
+    public void addParticle(ParticleOptions particle, boolean force, double x, double y, double z, double dx, double dy, double dz) {
     }
 
     @Override

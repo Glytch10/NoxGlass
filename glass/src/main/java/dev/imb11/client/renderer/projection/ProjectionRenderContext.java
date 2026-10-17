@@ -5,6 +5,7 @@ import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
 import net.minecraft.world.level.LightLayer;
@@ -54,7 +55,7 @@ public final class ProjectionRenderContext {
         return state == null ? null : state.camera;
     }
 
-    public static ProjectionLightmap lightTexture() {
+    public static LightTexture lightTexture() {
         State state = ACTIVE.get();
         return state == null ? null : state.lightTexture;
     }
@@ -68,7 +69,7 @@ public final class ProjectionRenderContext {
     }
 
     public static Scope enter(LevelRenderer renderer, Camera camera, RenderTarget target, BlockPos hiddenTerrainBlock,
-                              ClientLevel level, ProjectionLightmap lightTexture) {
+                              ClientLevel level, LightTexture lightTexture) {
         State previous = ACTIVE.get();
         ACTIVE.set(new State(renderer, camera, target, hiddenTerrainBlock.immutable(), level, lightTexture));
         return new Scope(previous);
@@ -104,7 +105,7 @@ public final class ProjectionRenderContext {
             RenderTarget target,
             BlockPos hiddenTerrainBlock,
             ClientLevel level,
-            ProjectionLightmap lightTexture
+            LightTexture lightTexture
     ) {
     }
 

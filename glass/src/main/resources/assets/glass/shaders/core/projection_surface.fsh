@@ -1,7 +1,6 @@
-#version 330
+#version 150
 
-#moj_import <minecraft:globals.glsl>
-#moj_import <minecraft:matrix.glsl>
+#moj_import <matrix.glsl>
 
 uniform sampler2D Projection0;
 uniform sampler2D Projection1;
@@ -9,14 +8,16 @@ uniform sampler2D Projection2;
 uniform sampler2D Projection3;
 uniform sampler2D PortalSky;
 uniform sampler2D PortalLayers;
-layout(std140) uniform SurfaceParameters {
-    vec4 RevealProgress;
-    vec4 ProjectionChannels;
-    vec4 ProjectorPositions[4];
-    vec4 SurfaceSettings;
-};
-#define LoadingOpacity SurfaceSettings.x
-#define CrossfadeWidth SurfaceSettings.y
+uniform vec3 ProjectorPosition0;
+uniform vec3 ProjectorPosition1;
+uniform vec3 ProjectorPosition2;
+uniform vec3 ProjectorPosition3;
+uniform vec4 StaticAmounts;
+uniform vec4 RevealProgress;
+uniform vec4 ProjectionChannels;
+uniform float LoadingOpacity;
+uniform float CrossfadeWidth;
+uniform float GameTime;
 
 noperspective in vec2 screenUv;
 in vec3 surfacePosition;
@@ -108,7 +109,7 @@ vec3 staticNoise() {
 
 vec3 projectionColor(int index) {
     vec3 projection = projectionSample(index);
-    float staticAmount = ProjectorPositions[index].w;
+    float staticAmount = StaticAmounts[index];
     return staticAmount > 0.0 ? mix(projection, staticNoise(), staticAmount) : projection;
 }
 
@@ -126,7 +127,7 @@ void main() {
         discard;
     }
 
-    vec3 positions[4] = vec3[4](ProjectorPositions[0].xyz, ProjectorPositions[1].xyz, ProjectorPositions[2].xyz, ProjectorPositions[3].xyz);
+    vec3 positions[4] = vec3[4](ProjectorPosition0, ProjectorPosition1, ProjectorPosition2, ProjectorPosition3);
     vec4 selected = visible;
     vec4 whiteOpacity = clamp(vec4(1.0) - (RevealProgress - revealDistances) * 0.5, 0.0, 1.0);
     for (int index = 0; index < 4; index++) {

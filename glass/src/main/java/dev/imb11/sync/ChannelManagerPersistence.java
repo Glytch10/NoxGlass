@@ -12,14 +12,14 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.TickTask;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.saveddata.SavedData;
-import net.minecraft.world.level.saveddata.SavedDataType;
 import org.jetbrains.annotations.Nullable;
 
 import java.text.Normalizer;
@@ -38,8 +38,9 @@ public final class ChannelManagerPersistence extends SavedData {
     public static final int MAX_WIRE_CHANNEL_NAME_LENGTH = 64;
     public static final int MAX_CHANNELS = 256;
     public static final String DEFAULT_CHANNEL = "Default";
-    public static final SavedDataType<ChannelManagerPersistence> TYPE = new SavedDataType<>(Identifier.withDefaultNamespace("glass_channels"), ChannelManagerPersistence::new, CompoundTag.CODEC.xmap(tag -> gather(tag, null), data -> data.save(new CompoundTag(), null)), null);
-    private static final SavedDataType<LegacyChannelData> LEGACY_TYPE = new SavedDataType<>(Identifier.withDefaultNamespace("glass_channels"), LegacyChannelData::new, CompoundTag.CODEC.xmap(tag -> LegacyChannelData.gather(tag), data -> data.save(new CompoundTag(), null)), null);
+    public static final SavedData.Factory<ChannelManagerPersistence> TYPE = new SavedData.Factory<>(ChannelManagerPersistence::new, ChannelManagerPersistence::gather, null);
+    private static final SavedData.Factory<LegacyChannelData> LEGACY_TYPE = new SavedData.Factory<>(LegacyChannelData::new, LegacyChannelData::gather, null);
+    private static final String DATA_ID = "glass_channels";
 
     private final Map<String, Channel> channels = new LinkedHashMap<>();
     private final Map<String, PendingLink> pendingLinks = new LinkedHashMap<>();
@@ -56,7 +57,7 @@ public final class ChannelManagerPersistence extends SavedData {
     }
 
     public static ChannelManagerPersistence get(MinecraftServer server) {
-        ChannelManagerPersistence persistence = server.overworld().getDataStorage().computeIfAbsent(TYPE);
+        ChannelManagerPersistence persistence = server.overworld().getDataStorage().computeIfAbsent(TYPE, DATA_ID);
         persistence.server = server;
         persistence.ensureDefaultChannel();
         return persistence;
@@ -252,6 +253,7 @@ public final class ChannelManagerPersistence extends SavedData {
         }
     }
 
+    @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider registryLookup) {
         tag.putLong("registry_revision", registryRevision);
         ListTag channelTags = new ListTag();
@@ -273,7 +275,7 @@ public final class ChannelManagerPersistence extends SavedData {
 
         ListTag imported = new ListTag();
         for (ResourceKey<Level> dimension : importedLegacyDimensions) {
-            imported.add(StringTag.valueOf(dimension.identifier().toString()));
+            imported.add(StringTag.valueOf(dimension.location().toString()));
         }
         tag.put("legacy_imported_dimensions", imported);
         return tag;
@@ -281,22 +283,22 @@ public final class ChannelManagerPersistence extends SavedData {
 
     public static ChannelManagerPersistence gather(CompoundTag tag, HolderLookup.Provider registryLookup) {
         ChannelManagerPersistence persistence = new ChannelManagerPersistence();
-        persistence.registryRevision = Math.max(0L, tag.getLongOr("registry_revision", 0L));
+        persistence.registryRevision = Math.max(0L, tag.getLong("registry_revision"));
         Map<String, Channel> loadedChannels = new LinkedHashMap<>();
         Map<String, PendingLink> loadedPending = new LinkedHashMap<>();
-        ListTag channelTags = tag.getListOrEmpty("channels");
+        ListTag channelTags = tag.getList("channels", Tag.TAG_COMPOUND);
         int count = Math.min(channelTags.size(), MAX_CHANNELS);
         for (int i = 0; i < count; i++) {
-            CompoundTag item = channelTags.getCompoundOrEmpty(i);
-            String name = canonicalChannelName(item.getStringOr("name", ""));
+            CompoundTag item = channelTags.getCompound(i);
+            String name = canonicalChannelName(item.getString("name"));
             if (name == null) {
                 continue;
             }
             BlockPos pos = getFromIntArrayNBT("linked_pos", item);
             ResourceKey<Level> dimension = readDimension(item, "linked_dimension");
-            Direction facing = Direction.byName(item.getStringOr("linked_facing", "").toLowerCase(Locale.ROOT));
+            Direction facing = Direction.byName(item.getString("linked_facing").toLowerCase(Locale.ROOT));
             if (pos != null && dimension != null && facing != null) {
-                long sourceRevision = Math.max(0L, item.getLongOr("source_revision", 0L));
+                long sourceRevision = Math.max(0L, item.getLong("source_revision"));
                 persistence.registryRevision = Math.max(persistence.registryRevision, sourceRevision);
                 loadedChannels.put(name, new Channel(name, new ProjectionSource(name, dimension, pos, facing, sourceRevision)));
                 loadedPending.remove(name);
@@ -312,9 +314,9 @@ public final class ChannelManagerPersistence extends SavedData {
         persistence.channels.putAll(loadedChannels);
         persistence.pendingLinks.putAll(loadedPending);
 
-        ListTag importedTags = tag.getListOrEmpty("legacy_imported_dimensions");
+        ListTag importedTags = tag.getList("legacy_imported_dimensions", Tag.TAG_STRING);
         for (int i = 0; i < importedTags.size(); i++) {
-            ResourceKey<Level> dimension = dimensionKey(Identifier.tryParse(importedTags.getStringOr(i, "")));
+            ResourceKey<Level> dimension = dimensionKey(ResourceLocation.tryParse(importedTags.getString(i)));
             if (dimension != null) {
                 persistence.importedLegacyDimensions.add(dimension);
             }
@@ -324,7 +326,7 @@ public final class ChannelManagerPersistence extends SavedData {
 
     @Nullable
     public static BlockPos getFromIntArrayNBT(String key, CompoundTag compound) {
-        int[] values = compound.getIntArray(key).orElseGet(() -> new int[0]);
+        int[] values = compound.getIntArray(key);
         return values.length < 3 ? null : new BlockPos(values[0], values[1], values[2]);
     }
 
@@ -378,7 +380,7 @@ public final class ChannelManagerPersistence extends SavedData {
             return;
         }
 
-        LegacyChannelData legacy = world.getDataStorage().computeIfAbsent(LEGACY_TYPE);
+        LegacyChannelData legacy = world.getDataStorage().computeIfAbsent(LEGACY_TYPE, DATA_ID);
         boolean registryChanged = false;
         for (LegacyEntry entry : legacy.entries()) {
             if (!channels.containsKey(entry.name()) && channels.size() < MAX_CHANNELS) {
@@ -456,19 +458,19 @@ public final class ChannelManagerPersistence extends SavedData {
 
     private static void writeLocation(CompoundTag tag, ResourceKey<Level> dimension, BlockPos pos) {
         tag.putIntArray("linked_pos", new int[]{pos.getX(), pos.getY(), pos.getZ()});
-        tag.putString("linked_dimension", dimension.identifier().toString());
+        tag.putString("linked_dimension", dimension.location().toString());
     }
 
     @Nullable
     private static ResourceKey<Level> readDimension(CompoundTag tag, String key) {
-        if (!tag.getString(key).isPresent()) {
+        if (!tag.contains(key, Tag.TAG_STRING)) {
             return Level.OVERWORLD;
         }
-        return dimensionKey(Identifier.tryParse(tag.getStringOr(key, "")));
+        return dimensionKey(ResourceLocation.tryParse(tag.getString(key)));
     }
 
     @Nullable
-    private static ResourceKey<Level> dimensionKey(@Nullable Identifier location) {
+    private static ResourceKey<Level> dimensionKey(@Nullable ResourceLocation location) {
         return location == null ? null : ResourceKey.create(Registries.DIMENSION, location);
     }
 
@@ -477,7 +479,7 @@ public final class ChannelManagerPersistence extends SavedData {
     }
 
     private static void defer(MinecraftServer server, Runnable runnable) {
-        server.schedule(new TickTask(server.getTickCount(), runnable));
+        server.tell(new TickTask(server.getTickCount(), runnable));
     }
 
     private record PendingLink(ResourceKey<Level> dimension, BlockPos pos) {
@@ -512,17 +514,18 @@ public final class ChannelManagerPersistence extends SavedData {
             return entries;
         }
 
+        @Override
         public CompoundTag save(CompoundTag tag, HolderLookup.Provider registryLookup) {
             return tag;
         }
 
-        private static LegacyChannelData gather(CompoundTag tag) {
+        private static LegacyChannelData gather(CompoundTag tag, HolderLookup.Provider registryLookup) {
             List<LegacyEntry> entries = new ArrayList<>();
-            ListTag channels = tag.getListOrEmpty("channels");
+            ListTag channels = tag.getList("channels", Tag.TAG_COMPOUND);
             int count = Math.min(channels.size(), MAX_CHANNELS);
             for (int i = 0; i < count; i++) {
-                CompoundTag channel = channels.getCompoundOrEmpty(i);
-                String name = canonicalChannelName(channel.getStringOr("name", ""));
+                CompoundTag channel = channels.getCompound(i);
+                String name = canonicalChannelName(channel.getString("name"));
                 BlockPos pos = getFromIntArrayNBT("linked_pos", channel);
                 if (name != null) {
                     entries.add(new LegacyEntry(name, pos));

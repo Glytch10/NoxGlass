@@ -4,14 +4,14 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public record S2CRemoteBlockEntitiesPacket(RemoteSubscriptionId subscription, long sequence, List<ClientboundBlockEntityDataPacket> updates) implements CustomPacketPayload {
     public static final int MAX_UPDATES = 32;
-    public static final Type<S2CRemoteBlockEntitiesPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_block_entities"));
+    public static final Type<S2CRemoteBlockEntitiesPacket> PACKET_ID = new Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remote_block_entities"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteBlockEntitiesPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteBlockEntitiesPacket::write, S2CRemoteBlockEntitiesPacket::read);
 
     public S2CRemoteBlockEntitiesPacket {

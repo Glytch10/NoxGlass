@@ -1,5 +1,5 @@
 plugins {
-    id("imb11.fabric-mod")
+    id("imb11.fabric-remap-mod")
 }
 
 loom {
@@ -7,9 +7,9 @@ loom {
 }
 
 dependencies {
-    compileOnly(mcLibrary("sodium-fabric"))
-    compileOnly(mcLibrary("iris-fabric"))
+    "modCompileOnly"(mcLibrary("sodium-fabric"))
+    "modCompileOnly"(mcLibrary("iris-fabric"))
     if (providers.gradleProperty("with_sodium").isPresent) {
-        "localRuntime"(mcLibrary("sodium-fabric"))
+        "modLocalRuntime"(mcLibrary("sodium-fabric"))
     }
 }

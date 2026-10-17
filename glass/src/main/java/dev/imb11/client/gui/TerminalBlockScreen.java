@@ -48,7 +48,7 @@ public final class TerminalBlockScreen extends ChannelScreen<TerminalBlockGUI> {
             return Component.literal("Available");
         }
         return Component.literal("Used by terminal at " + channel.source().pos().toShortString()
-                + " (" + channel.source().dimension().identifier() + ")");
+                + " (" + channel.source().dimension().location() + ")");
     }
 
     @Override

@@ -16,7 +16,7 @@ abstract class TrackedEntityMixin {
     @Final
     private Entity entity;
 
-    @Inject(method = "sendToTrackingPlayers", at = @At("TAIL"))
+    @Inject(method = "broadcast", at = @At("TAIL"))
     private void glass$broadcastRemoteEntity(Packet<?> packet, CallbackInfo ci) {
         RemoteSceneServerManager.onEntityPacket(entity, packet);
     }

@@ -22,12 +22,12 @@ public final class PlatformNetworking {
     }
 
     public static <T extends CustomPacketPayload> void registerServerbound(CustomPacketPayload.Type<T> type, StreamCodec<? super RegistryFriendlyByteBuf, T> codec, BiConsumer<T, ServerPlayer> handler) {
-        PayloadTypeRegistry.serverboundPlay().register(type, codec);
+        PayloadTypeRegistry.playC2S().register(type, codec);
         ServerPlayNetworking.registerGlobalReceiver(type, (packet, context) -> handler.accept(packet, context.player()));
     }
 
     public static <T extends CustomPacketPayload> void registerClientbound(CustomPacketPayload.Type<T> type, StreamCodec<? super RegistryFriendlyByteBuf, T> codec) {
-        PayloadTypeRegistry.clientboundPlay().register(type, codec);
+        PayloadTypeRegistry.playS2C().register(type, codec);
     }
 
     public static boolean canSend(ServerPlayer player, CustomPacketPayload.Type<?> type) {
@@ -54,12 +54,13 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerEntity;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.ChunkPos;
 import net.neoforged.neoforge.network.PacketDistributor;
+import net.neoforged.neoforge.network.bundle.PacketAndPayloadAcceptor;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
@@ -73,7 +74,7 @@ import java.util.function.Consumer;
 
 public final class PlatformNetworking {
     private static final List<Consumer<PayloadRegistrar>> REGISTRATIONS = new ArrayList<>();
-    private static final Map<Identifier, Consumer<CustomPacketPayload>> CLIENT_HANDLERS = new HashMap<>();
+    private static final Map<ResourceLocation, Consumer<CustomPacketPayload>> CLIENT_HANDLERS = new HashMap<>();
 
     private PlatformNetworking() {
     }
@@ -111,11 +112,11 @@ public final class PlatformNetworking {
     }
 
     public static Collection<ServerPlayer> tracking(ServerLevel level, BlockPos pos) {
-        return level.getChunkSource().chunkMap.getPlayers(ChunkPos.containing(pos), false);
+        return level.getChunkSource().chunkMap.getPlayers(new ChunkPos(pos), false);
     }
 
     public static void sendPairingData(ServerEntity entity, ServerPlayer player, Consumer<Packet<?>> consumer) {
-        entity.sendPairingData(player, consumer::accept);
+        entity.sendPairingData(player, new PacketAndPayloadAcceptor<>(consumer::accept));
     }
 }
 *///?}

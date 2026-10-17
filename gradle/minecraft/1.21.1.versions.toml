@@ -1,0 +1,18 @@
+[versions]
+java = "21"
+fabric-api = "0.103.0+1.21.1"
+fabric-loader = "0.16.3"
+neoforge = "21.1.249"
+iris-fabric = "1.8.14-beta.1+1.21.1-fabric"
+iris-neoforge = "1.8.14-beta.1+1.21.1-neoforge"
+sodium-fabric = "mc1.21.1-0.8.13-fabric"
+sodium-neoforge = "mc1.21.1-0.8.13-neoforge"
+
+[libraries]
+fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fabric-api" }
+fabric-loader = { module = "net.fabricmc:fabric-loader", version.ref = "fabric-loader" }
+neoforge = { module = "net.neoforged:neoforge", version.ref = "neoforge" }
+iris-fabric = { module = "maven.modrinth:iris", version.ref = "iris-fabric" }
+iris-neoforge = { module = "maven.modrinth:iris", version.ref = "iris-neoforge" }
+sodium-fabric = { module = "maven.modrinth:sodium", version.ref = "sodium-fabric" }
+sodium-neoforge = { module = "maven.modrinth:sodium", version.ref = "sodium-neoforge" }

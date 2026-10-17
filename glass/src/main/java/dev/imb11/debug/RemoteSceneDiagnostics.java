@@ -53,8 +53,8 @@ public record RemoteSceneDiagnostics(
             int unlit = 0;
             ChunkPos firstMissing = null;
             ChunkPos firstUnlit = null;
-            for (int x = center.x() - radius; x <= center.x() + radius; x++) {
-                for (int z = center.z() - radius; z <= center.z() + radius; z++) {
+            for (int x = center.x - radius; x <= center.x + radius; x++) {
+                for (int z = center.z - radius; z <= center.z + radius; z++) {
                     ChunkPos pos = new ChunkPos(x, z);
                     if (!present.test(pos)) {
                         missing++;

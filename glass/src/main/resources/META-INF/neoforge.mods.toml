@@ -29,4 +29,4 @@ ordering="NONE"
 side="BOTH"
 
 [features.glass]
-javaVersion="[25,)"
+javaVersion="[21,)"

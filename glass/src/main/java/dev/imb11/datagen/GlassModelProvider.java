@@ -4,28 +4,25 @@ package dev.imb11.datagen;
 import dev.imb11.blocks.GBlocks;
 import dev.imb11.blocks.ProjectorBlock;
 import dev.imb11.blocks.TerminalBlock;
-import net.fabricmc.fabric.api.datagen.v1.FabricPackOutput;
-import net.fabricmc.fabric.api.client.datagen.v1.provider.FabricModelProvider;
+import net.fabricmc.fabric.api.datagen.v1.FabricDataOutput;
+import net.fabricmc.fabric.api.datagen.v1.provider.FabricModelProvider;
 import net.minecraft.core.Direction;
-import net.minecraft.client.data.models.BlockModelGenerators;
-import net.minecraft.client.data.models.ItemModelGenerators;
-import net.minecraft.client.data.models.blockstates.MultiVariantGenerator;
-import net.minecraft.client.data.models.blockstates.PropertyDispatch;
-import net.minecraft.client.renderer.block.dispatch.Variant;
-import net.minecraft.client.renderer.block.dispatch.VariantMutator;
-import net.minecraft.client.data.models.MultiVariant;
-import net.minecraft.util.random.WeightedList;
-import com.mojang.math.Quadrant;
-import net.minecraft.client.data.models.model.ModelTemplate;
-import net.minecraft.client.data.models.model.ModelTemplates;
-import net.minecraft.client.data.models.model.TextureMapping;
-import net.minecraft.resources.Identifier;
+import net.minecraft.data.models.BlockModelGenerators;
+import net.minecraft.data.models.ItemModelGenerators;
+import net.minecraft.data.models.blockstates.MultiVariantGenerator;
+import net.minecraft.data.models.blockstates.PropertyDispatch;
+import net.minecraft.data.models.blockstates.Variant;
+import net.minecraft.data.models.blockstates.VariantProperties;
+import net.minecraft.data.models.model.ModelTemplate;
+import net.minecraft.data.models.model.ModelTemplates;
+import net.minecraft.data.models.model.TextureMapping;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 
 import java.util.Optional;
 
 public class GlassModelProvider extends FabricModelProvider {
-    public GlassModelProvider(FabricPackOutput output) {
+    public GlassModelProvider(FabricDataOutput output) {
         super(output);
     }
 
@@ -34,37 +31,36 @@ public class GlassModelProvider extends FabricModelProvider {
         createCube(generator, GBlocks.REDSTONE_INFUSED_SAND, GBlocks.REDSTONE_INFUSED_SAND);
         createCube(generator, GBlocks.POWERABLE_GLASS, GBlocks.POWERABLE_GLASS);
 
-        Identifier terminalModel = new ModelTemplate(Optional.of(Identifier.fromNamespaceAndPath("glass", "block/terminal_camera")), Optional.empty())
+        ResourceLocation terminalModel = new ModelTemplate(Optional.of(ResourceLocation.fromNamespaceAndPath("glass", "block/terminal_camera")), Optional.empty())
                 .create(GBlocks.TERMINAL, new TextureMapping(), generator.modelOutput);
-        Identifier projectingTerminalModel = new ModelTemplate(Optional.of(terminalModel), Optional.of("_projecting"))
+        ResourceLocation projectingTerminalModel = new ModelTemplate(Optional.of(terminalModel), Optional.of("_projecting"))
                 .create(GBlocks.TERMINAL, new TextureMapping(), generator.modelOutput);
-        generator.blockStateOutput.accept(MultiVariantGenerator.dispatch(GBlocks.TERMINAL)
-                .with(PropertyDispatch.initial(TerminalBlock.PROJECTING)
-                        .select(false, plain(terminalModel))
-                        .select(true, plain(projectingTerminalModel)))
-                .with(PropertyDispatch.modify(TerminalBlock.FACING)
-                        .select(Direction.SOUTH, BlockModelGenerators.NOP)
-                        .select(Direction.NORTH, VariantMutator.Y_ROT.withValue(Quadrant.R180))
-                        .select(Direction.WEST, VariantMutator.Y_ROT.withValue(Quadrant.R90))
-                        .select(Direction.EAST, VariantMutator.Y_ROT.withValue(Quadrant.R270))
-                        .select(Direction.UP, VariantMutator.X_ROT.withValue(Quadrant.R90))
-                        .select(Direction.DOWN, VariantMutator.X_ROT.withValue(Quadrant.R270).then(VariantMutator.Y_ROT.withValue(Quadrant.R180)))));
+        generator.blockStateOutput.accept(MultiVariantGenerator.multiVariant(GBlocks.TERMINAL)
+                .with(PropertyDispatch.property(TerminalBlock.PROJECTING)
+                        .select(false, Variant.variant().with(VariantProperties.MODEL, terminalModel))
+                        .select(true, Variant.variant().with(VariantProperties.MODEL, projectingTerminalModel)))
+                .with(PropertyDispatch.property(TerminalBlock.FACING)
+                        .select(Direction.SOUTH, Variant.variant())
+                        .select(Direction.NORTH, Variant.variant().with(VariantProperties.Y_ROT, VariantProperties.Rotation.R180))
+                        .select(Direction.WEST, Variant.variant().with(VariantProperties.Y_ROT, VariantProperties.Rotation.R90))
+                        .select(Direction.EAST, Variant.variant().with(VariantProperties.Y_ROT, VariantProperties.Rotation.R270))
+                        .select(Direction.UP, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R90))
+                        .select(Direction.DOWN, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R270).with(VariantProperties.Y_ROT, VariantProperties.Rotation.R180))));
 
-        Identifier projectorModel = new ModelTemplate(Optional.of(Identifier.fromNamespaceAndPath("glass", "block/projector_assembly")), Optional.empty())
+        ResourceLocation projectorModel = new ModelTemplate(Optional.of(ResourceLocation.fromNamespaceAndPath("glass", "block/projector_assembly")), Optional.empty())
                 .create(GBlocks.PROJECTOR, new TextureMapping(), generator.modelOutput);
-        generator.blockStateOutput.accept(MultiVariantGenerator.dispatch(GBlocks.PROJECTOR)
-                .with(PropertyDispatch.initial(ProjectorBlock.POWERED)
-                        .select(false, plain(projectorModel))
-                        .select(true, plain(projectorModel)))
-                .with(PropertyDispatch.modify(ProjectorBlock.FACING)
-                        .select(Direction.UP, BlockModelGenerators.NOP)
-                        .select(Direction.DOWN, VariantMutator.X_ROT.withValue(Quadrant.R180))
-                        .select(Direction.SOUTH, VariantMutator.X_ROT.withValue(Quadrant.R90))
-                        .select(Direction.WEST, VariantMutator.X_ROT.withValue(Quadrant.R90).then(VariantMutator.Y_ROT.withValue(Quadrant.R90)))
-                        .select(Direction.NORTH, VariantMutator.X_ROT.withValue(Quadrant.R90).then(VariantMutator.Y_ROT.withValue(Quadrant.R180)))
-                        .select(Direction.EAST, VariantMutator.X_ROT.withValue(Quadrant.R90).then(VariantMutator.Y_ROT.withValue(Quadrant.R270)))));
-        generator.registerSimpleItemModel(GBlocks.PROJECTOR, Identifier.fromNamespaceAndPath("glass", "item/projector"));
-        generator.registerSimpleItemModel(GBlocks.TERMINAL, terminalModel);
+        generator.blockStateOutput.accept(MultiVariantGenerator.multiVariant(GBlocks.PROJECTOR)
+                .with(PropertyDispatch.property(ProjectorBlock.POWERED)
+                        .select(false, Variant.variant().with(VariantProperties.MODEL, projectorModel))
+                        .select(true, Variant.variant().with(VariantProperties.MODEL, projectorModel)))
+                .with(PropertyDispatch.property(ProjectorBlock.FACING)
+                        .select(Direction.UP, Variant.variant())
+                        .select(Direction.DOWN, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R180))
+                        .select(Direction.SOUTH, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R90))
+                        .select(Direction.WEST, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R90).with(VariantProperties.Y_ROT, VariantProperties.Rotation.R90))
+                        .select(Direction.NORTH, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R90).with(VariantProperties.Y_ROT, VariantProperties.Rotation.R180))
+                        .select(Direction.EAST, Variant.variant().with(VariantProperties.X_ROT, VariantProperties.Rotation.R90).with(VariantProperties.Y_ROT, VariantProperties.Rotation.R270))));
+        generator.skipAutoItemBlock(GBlocks.PROJECTOR);
     }
 
     @Override
@@ -72,12 +68,8 @@ public class GlassModelProvider extends FabricModelProvider {
     }
 
     private static void createCube(BlockModelGenerators generator, Block block, Block texture) {
-        Identifier model = ModelTemplates.CUBE_ALL.create(block, TextureMapping.cube(texture), generator.modelOutput);
-        generator.blockStateOutput.accept(MultiVariantGenerator.dispatch(block, plain(model)));
-        generator.registerSimpleItemModel(block, model);
-    }
-    private static MultiVariant plain(Identifier model) {
-        return new MultiVariant(WeightedList.of(new Variant(model)));
+        ResourceLocation model = ModelTemplates.CUBE_ALL.create(block, TextureMapping.cube(texture), generator.modelOutput);
+        generator.blockStateOutput.accept(MultiVariantGenerator.multiVariant(block, Variant.variant().with(VariantProperties.MODEL, model)));
     }
 }
 //?}

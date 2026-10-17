@@ -57,7 +57,7 @@ public final class GNetworking {
 
     public static void sendSnapshot(ServerPlayer player) {
         if (PlatformNetworking.canSend(player, S2CChannelSnapshotPacket.PACKET_ID)) {
-            PlatformNetworking.send(player, ChannelManagerPersistence.get(player.level().getServer()).snapshotPacket());
+            PlatformNetworking.send(player, ChannelManagerPersistence.get(player.serverLevel().getServer()).snapshotPacket());
         }
     }
 
@@ -85,7 +85,7 @@ public final class GNetworking {
     }
 
     private static boolean validTarget(ServerPlayer player, BlockPos pos, boolean terminal) {
-        var level = player.level();
+        var level = player.serverLevel();
         if (!level.hasChunkAt(pos)
                 || player.distanceToSqr(pos.getX() + 0.5D, pos.getY() + 0.5D, pos.getZ() + 0.5D) > MAX_INTERACTION_DISTANCE_SQUARED) {
             return false;

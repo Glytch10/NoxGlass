@@ -9,10 +9,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 public record C2STerminalChannelChangedPacket(BlockPos pos, String channel) implements CustomPacketPayload {
-    public static final CustomPacketPayload.Type<C2STerminalChannelChangedPacket> PACKET_ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("glass", "terminal_channel_changed"));
+    public static final CustomPacketPayload.Type<C2STerminalChannelChangedPacket> PACKET_ID = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("glass", "terminal_channel_changed"));
     public static final StreamCodec<RegistryFriendlyByteBuf, C2STerminalChannelChangedPacket> PACKET_CODEC = StreamCodec.ofMember((value, buf) -> {
         buf.writeBlockPos(value.pos());
         buf.writeUtf(value.channel(), ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
@@ -31,7 +31,7 @@ public record C2STerminalChannelChangedPacket(BlockPos pos, String channel) impl
         if (channel == null) {
             return;
         }
-        var level = player.level();
+        var level = player.serverLevel();
         if (!(level.getBlockEntity(payload.pos()) instanceof TerminalBlockEntity terminal)) {
             return;
         }

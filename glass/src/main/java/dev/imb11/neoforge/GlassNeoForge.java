@@ -40,9 +40,7 @@ public final class GlassNeoForge {
     }
 
     private static void register(RegisterEvent event) {
-        if (event.getRegistryKey().equals(Registries.TICKET_TYPE)) {
-            RemoteSceneServerManager.registerTicketType();
-        } else if (event.getRegistryKey().equals(Registries.BLOCK)) {
+        if (event.getRegistryKey().equals(Registries.BLOCK)) {
             GBlocks.registerBlocks();
         } else if (event.getRegistryKey().equals(Registries.ITEM)) {
             GItems.init();
@@ -76,13 +74,13 @@ public final class GlassNeoForge {
 
     private static void playerLeft(PlayerEvent.PlayerLoggedOutEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            RemoteSceneServerManager.removePlayer(player.level().getServer(), player, false);
+            RemoteSceneServerManager.removePlayer(player.server, player, false);
         }
     }
 
     private static void playerChangedDimension(PlayerEvent.PlayerChangedDimensionEvent event) {
         if (event.getEntity() instanceof ServerPlayer player) {
-            RemoteSceneServerManager.removePlayer(player.level().getServer(), player, true);
+            RemoteSceneServerManager.removePlayer(player.server, player, true);
             GNetworking.sendSnapshot(player);
         }
     }

@@ -7,10 +7,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 public record C2SDeleteChannelPacket(BlockPos pos, String channel) implements CustomPacketPayload {
-    public static final CustomPacketPayload.Type<C2SDeleteChannelPacket> PACKET_ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("glass", "delete_channel"));
+    public static final CustomPacketPayload.Type<C2SDeleteChannelPacket> PACKET_ID = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("glass", "delete_channel"));
     public static final StreamCodec<RegistryFriendlyByteBuf, C2SDeleteChannelPacket> PACKET_CODEC = StreamCodec.ofMember((value, buf) -> {
         buf.writeBlockPos(value.pos());
         buf.writeUtf(value.channel(), ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
@@ -23,7 +23,7 @@ public record C2SDeleteChannelPacket(BlockPos pos, String channel) implements Cu
 
     public static void receive(C2SDeleteChannelPacket payload, ServerPlayer player) {
         if (GNetworking.canUseTerminal(player, payload.pos())) {
-            ChannelManagerPersistence.get(player.level()).deleteChannel(payload.channel());
+            ChannelManagerPersistence.get(player.serverLevel()).deleteChannel(payload.channel());
         }
     }
 }

@@ -1,14 +1,16 @@
 package dev.imb11.client.renderer.block;
 
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.PrimitiveTopology;
-import net.minecraft.client.renderer.BindGroupLayouts;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import com.mojang.math.Axis;
 import dev.imb11.blocks.ProjectorBlock;
 import dev.imb11.debug.ProjectorActivationTrace;
 import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.client.ClientProjectionSourceRegistry;
+import dev.imb11.client.ShaderRegistrar;
 import dev.imb11.client.renderer.projection.ProjectionRenderManager;
 import dev.imb11.client.renderer.projection.ProjectionSurfaceRenderer;
 import dev.imb11.client.renderer.projection.ProjectionStage;
@@ -16,63 +18,85 @@ import dev.imb11.projection.ProjectionSurface;
 import dev.imb11.sync.ProjectionSource;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderStateShard;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.ShaderInstance;
+import net.minecraft.client.renderer.entity.ItemRenderer;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
+import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
 
 import java.util.ArrayList;
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 
-public final class ProjectorBlockEntityRenderer {
-    private static final com.mojang.blaze3d.pipeline.RenderPipeline LENS_PIPELINE = com.mojang.blaze3d.pipeline.RenderPipeline.builder()
-            .withLocation(Identifier.fromNamespaceAndPath("glass", "projector_lens"))
-            .withVertexShader(Identifier.fromNamespaceAndPath("glass", "core/projector_lens"))
-            .withFragmentShader(Identifier.fromNamespaceAndPath("glass", "core/projector_lens"))
-            .withVertexBinding(0, DefaultVertexFormat.POSITION_TEX)
-            .withPrimitiveTopology(PrimitiveTopology.QUADS)
-            .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
-            .withBindGroupLayout(BindGroupLayouts.GLOBALS)
-            .withBindGroupLayout(BindGroupLayouts.SAMPLER0)
-            .withDepthStencilState(new com.mojang.blaze3d.pipeline.DepthStencilState(com.mojang.blaze3d.platform.CompareOp.GREATER_THAN_OR_EQUAL, false))
-            .withColorTargetState(new com.mojang.blaze3d.pipeline.ColorTargetState(com.mojang.blaze3d.pipeline.BlendFunction.TRANSLUCENT))
-            .withCull(false).build();
+public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<ProjectorBlockEntity> {
+    private static ShaderInstance lensShader;
+    private static final RenderType READY_GLINT = RenderType.create(
+            "glass_projector_ready_glint",
+            DefaultVertexFormat.POSITION_TEX,
+            VertexFormat.Mode.QUADS,
+            1536,
+            false,
+            false,
+            RenderType.CompositeState.builder()
+                    .setShaderState(new RenderStateShard.ShaderStateShard(() -> lensShader))
+                    .setTextureState(new RenderStateShard.TextureStateShard(ItemRenderer.ENCHANTED_GLINT_ITEM, true, false))
+                    .setTexturingState(RenderStateShard.GLINT_TEXTURING)
+                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .setWriteMaskState(RenderStateShard.COLOR_WRITE)
+                    .setCullState(RenderStateShard.NO_CULL)
+                    .createCompositeState(false)
+    );
     private static final long LOADING_FADE_NANOS = 500_000_000L;
     private static final float LOADING_MAX_OPACITY = 0.35F;
     private static final int VIEW_DISTANCE = 64;
-    private static final double VIEW_DISTANCE_SQUARED = VIEW_DISTANCE * VIEW_DISTANCE;    private static final Map<ClientLevel, Map<BlockPos, ProjectorBlockEntity>> LOADED_PROJECTORS = new IdentityHashMap<>();
+    private static final double VIEW_DISTANCE_SQUARED = VIEW_DISTANCE * VIEW_DISTANCE;
+    private static final Map<ClientLevel, Map<BlockPos, ProjectorBlockEntity>> LOADED_PROJECTORS = new IdentityHashMap<>();
     private static ClientLevel frustumLevel;
     private static long frustumFrame = Long.MIN_VALUE;
     private static Frustum frustum;
 
-    private ProjectorBlockEntityRenderer() {
+    public ProjectorBlockEntityRenderer(BlockEntityRendererProvider.Context ctx) {}
+
+    public static void registerShader(ShaderRegistrar registrar) throws IOException {
+        registrar.register(ResourceLocation.fromNamespaceAndPath("glass", "projector_lens"),
+                DefaultVertexFormat.POSITION_TEX, shader -> lensShader = shader);
     }
 
-    public static void renderAll(Matrix4f modelView) {
-        Minecraft minecraft = Minecraft.getInstance();
-        ClientLevel level = minecraft.level;
-        var projectors = LOADED_PROJECTORS.get(level);
-        if (projectors == null) {
-            return;
+    @Override
+    public boolean shouldRenderOffScreen(ProjectorBlockEntity entity) {
+        return true;
+    }
+
+    @Override
+    public int getViewDistance() {
+        return VIEW_DISTANCE;
+    }
+
+    @Override
+    public boolean shouldRender(ProjectorBlockEntity entity, Vec3 cameraPosition) {
+        if (!(entity.getLevel() instanceof ClientLevel clientLevel) || entity.isRemoved()) {
+            return false;
         }
-        Vec3 camera = minecraft.gameRenderer.mainCamera().position();
-        for (ProjectorBlockEntity projector : List.copyOf(projectors.values())) {
-            if (projector.isRemoved() || distanceToSqr(renderBounds(projector, projector.getProjectionSurface()), camera) > VIEW_DISTANCE_SQUARED) {
-                continue;
-            }
-            PoseStack poses = new PoseStack();
-            poses.mulPose(modelView);
-            BlockPos pos = projector.getBlockPos();
-            poses.translate(pos.getX() - camera.x, pos.getY() - camera.y, pos.getZ() - camera.z);
-            render(projector, poses);
+        ProjectionSurface surface = entity.getProjectionSurface();
+        if (surface != null) {
+            ProjectionRenderManager.trackViewer(clientLevel, entity.getBlockPos(), surface, cameraPosition);
         }
+        return distanceToSqr(renderBounds(entity, surface), cameraPosition) <= VIEW_DISTANCE_SQUARED;
     }
 
     public static void registerLoaded(ClientLevel level, ProjectorBlockEntity entity) {
@@ -83,6 +107,13 @@ public final class ProjectorBlockEntityRenderer {
         ProjectorBlockEntity previous = projectors.put(entity.getBlockPos().immutable(), entity);
         if (previous != null && previous != entity) {
             ProjectorActivationTrace.forget(previous);
+        }
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == level) {
+            minecraft.levelRenderer.updateGlobalBlockEntities(
+                    previous == null || previous == entity ? List.of() : List.of(previous),
+                    List.of(entity)
+            );
         }
     }
 
@@ -95,10 +126,22 @@ public final class ProjectorBlockEntityRenderer {
                 LOADED_PROJECTORS.remove(level);
             }
         }
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == level) {
+            minecraft.levelRenderer.updateGlobalBlockEntities(List.of(entity), List.of());
+        }
     }
 
-    public static void onMainRendererRebuilt() {
-        clearFrustum();
+    public static void onMainRendererRebuilt(LevelRenderer renderer) {
+        Minecraft minecraft = Minecraft.getInstance();
+        ClientLevel level = minecraft.level;
+        if (renderer != minecraft.levelRenderer || level == null) {
+            return;
+        }
+        Map<BlockPos, ProjectorBlockEntity> projectors = LOADED_PROJECTORS.get(level);
+        if (projectors != null && !projectors.isEmpty()) {
+            renderer.updateGlobalBlockEntities(List.of(), List.copyOf(projectors.values()));
+        }
     }
 
     public static void clearLoaded() {
@@ -112,7 +155,7 @@ public final class ProjectorBlockEntityRenderer {
         if (projectors == null || minecraft.player == null) {
             return;
         }
-        Vec3 viewer = minecraft.gameRenderer.mainCamera().position();
+        Vec3 viewer = minecraft.gameRenderer.getMainCamera().getPosition();
         List<ProjectorBlockEntity> nearby = new ArrayList<>();
         for (ProjectorBlockEntity projector : projectors.values()) {
             projector.setClientProjectionReady(false);
@@ -191,7 +234,8 @@ public final class ProjectorBlockEntityRenderer {
         clearFrustum();
     }
 
-    private static void render(ProjectorBlockEntity entity, PoseStack matrices) {
+    @Override
+    public void render(ProjectorBlockEntity entity, float tickDelta, PoseStack matrices, MultiBufferSource vertexConsumers, int light, int overlay) {
         if (!(entity.getLevel() instanceof ClientLevel clientLevel)) {
             return;
         }
@@ -206,7 +250,7 @@ public final class ProjectorBlockEntityRenderer {
             return;
         }
 
-        renderReadyGlint(entity, matrices);
+        renderReadyGlint(entity, matrices, vertexConsumers);
 
         if (!entity.isProjectionVisible() || surface == null) {
             entity.stopLoadingAnimation();
@@ -230,7 +274,10 @@ public final class ProjectorBlockEntityRenderer {
         );
     }
 
-    private static void renderReadyGlint(ProjectorBlockEntity entity, PoseStack matrices) {
+    private static void renderReadyGlint(ProjectorBlockEntity entity, PoseStack matrices, MultiBufferSource buffers) {
+        if (lensShader == null) {
+            return;
+        }
         matrices.pushPose();
         matrices.translate(0.5D, 0.5D, 0.5D);
         Direction facing = entity.getBlockState().getValue(ProjectorBlock.FACING);
@@ -241,7 +288,7 @@ public final class ProjectorBlockEntityRenderer {
             matrices.mulPose(Axis.XP.rotationDegrees(-90.0F));
         }
         matrices.translate(-0.5D, -0.5D, -0.5D);
-        var vertices = dev.imb11.client.renderer.projection.ProjectionMesh.begin(DefaultVertexFormat.POSITION_TEX);
+        VertexConsumer vertices = buffers.getBuffer(READY_GLINT);
         Matrix4f pose = matrices.last().pose();
         float min = 6.0F / 16.0F;
         float max = 10.0F / 16.0F;
@@ -250,10 +297,6 @@ public final class ProjectorBlockEntityRenderer {
         vertices.addVertex(pose, max, y, min).setUv(1.0F, 0.0F);
         vertices.addVertex(pose, max, y, max).setUv(1.0F, 1.0F);
         vertices.addVertex(pose, min, y, max).setUv(0.0F, 1.0F);
-        var texture = Minecraft.getInstance().getTextureManager().getTexture(Identifier.withDefaultNamespace("textures/misc/enchanted_glint_item.png")).getTextureView();
-        try (var mesh = new dev.imb11.client.renderer.projection.ProjectionMesh(vertices.buildOrThrow())) {
-            mesh.draw(LENS_PIPELINE, new Matrix4f(), Map.of("Sampler0", texture), null);
-        }
         matrices.popPose();
     }
 
@@ -285,10 +328,10 @@ public final class ProjectorBlockEntityRenderer {
     private static Frustum currentFrustum(ClientLevel level, long frame) {
         if (frustum == null || frustumLevel != level || frustumFrame != frame) {
             Minecraft minecraft = Minecraft.getInstance();
-            Vec3 cameraPosition = minecraft.gameRenderer.mainCamera().position();
+            Vec3 cameraPosition = minecraft.gameRenderer.getMainCamera().getPosition();
             frustum = new Frustum(
-                    minecraft.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.viewRotationMatrix,
-                    new Matrix4f(minecraft.gameRenderer.gameRenderState().levelRenderState.cameraRenderState.projectionMatrix)
+                    new Matrix4f(RenderSystem.getModelViewMatrix()),
+                    new Matrix4f(RenderSystem.getProjectionMatrix())
             );
             frustum.prepare(cameraPosition.x, cameraPosition.y, cameraPosition.z);
             frustumLevel = level;

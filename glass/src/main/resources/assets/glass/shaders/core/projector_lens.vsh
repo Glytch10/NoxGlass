@@ -1,11 +1,11 @@
-#version 330
+#version 150
 
 in vec3 Position;
 in vec2 UV0;
 
-#moj_import <minecraft:dynamictransforms.glsl>
-#moj_import <minecraft:projection.glsl>
-#moj_import <minecraft:globals.glsl>
+uniform mat4 ModelViewMat;
+uniform mat4 ProjMat;
+uniform mat4 TextureMat;
 
 out vec2 lensUv;
 out vec2 shimmerUv;
@@ -16,5 +16,5 @@ void main() {
     gl_Position = ProjMat * position;
     vertexDistance = length(position.xyz);
     lensUv = UV0;
-    shimmerUv = UV0 / 8.0 + vec2(GameTime * 16.0, GameTime * 8.0);
+    shimmerUv = (TextureMat * vec4(UV0 / 64.0, 0.0, 1.0)).xy;
 }

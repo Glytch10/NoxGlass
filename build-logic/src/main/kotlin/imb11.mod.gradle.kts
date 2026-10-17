@@ -16,7 +16,8 @@ val catalog = minecraftCatalog
 val minecraftVersion = project.minecraftVersion
 val loader = project.name.substringAfterLast('-')
 val moduleDirectory = requireNotNull(project.parent).layout.projectDirectory
-val javaVersion = providers.gradleProperty("javaVersion").get().toInt()
+val javaVersion = catalog.findVersion("java").map { it.requiredVersion.toInt() }
+    .orElseGet { providers.gradleProperty("javaVersion").get().toInt() }
 val releaseVersion = "${metadata.version}+$minecraftVersion"
 
 group = metadata.required("mod.group")
@@ -75,7 +76,9 @@ val targetMinecraft = when {
     loader == "fabric" -> "=$minecraftVersion"
     else -> "[$minecraftVersion]"
 }
-val yaclVersion = mcLibrary("yacl-$loader").get().versionConstraint.requiredVersion.removeSuffix("-$loader")
+val yaclVersion = catalog.findLibrary("yacl-$loader")
+    .map { it.get().versionConstraint.requiredVersion.removeSuffix("-$loader") }
+    .orElse("")
 val resourceProperties = mapOf(
     "version" to releaseVersion,
     "mod_version" to metadata.version,

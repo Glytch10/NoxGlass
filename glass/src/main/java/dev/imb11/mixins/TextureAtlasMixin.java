@@ -1,7 +1,7 @@
 package dev.imb11.mixins;
 
 import dev.imb11.client.compat.SodiumCompatibility;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -14,7 +14,7 @@ import java.util.List;
 @Mixin(TextureAtlas.class)
 abstract class TextureAtlasMixin {
     @Shadow
-    private List<TextureAtlasSprite> sprites;
+    private List<SpriteContents> sprites;
 
     @Inject(method = "cycleAnimationFrames", at = @At("HEAD"))
     private void glass$animateProjectionTextures(CallbackInfo callbackInfo) {

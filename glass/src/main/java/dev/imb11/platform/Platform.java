@@ -1,7 +1,7 @@
 //? if fabric {
 package dev.imb11.platform;
 
-import net.fabricmc.fabric.api.menu.v1.ExtendedMenuType;
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerType;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -24,7 +24,7 @@ public final class Platform {
     }
 
     public static <T extends AbstractContainerMenu, D> MenuType<T> menuType(MenuFactory<T, D> factory, StreamCodec<? super RegistryFriendlyByteBuf, D> codec) {
-        return new ExtendedMenuType<>(factory::create, codec);
+        return new ExtendedScreenHandlerType<>(factory::create, codec);
     }
 }
 //?} else {

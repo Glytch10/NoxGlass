@@ -12,6 +12,7 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.chunk.LevelChunk;
 
+import java.io.IOException;
 
 public final class GlassClient {
     private static volatile ClientLevel activeLevel;
@@ -24,11 +25,12 @@ public final class GlassClient {
         RemoteSceneClientManager.registerReceivers();
     }
 
-    public static void onResourceReload() {
+    public static void registerProjectionShader(ShaderRegistrar registrar) throws IOException {
         ProjectionRenderManager.reset();
         RemoteSceneClientManager.onResourceReload();
         ProjectorBlockEntityRenderer.reset();
-        ProjectionSurfaceRenderer.reset();
+        ProjectionSurfaceRenderer.registerShader(registrar);
+        ProjectorBlockEntityRenderer.registerShader(registrar);
     }
 
     public static void invalidateRenderState() {
@@ -75,7 +77,7 @@ public final class GlassClient {
         if (currentLevel == null) {
             ProjectionRenderManager.reset();
         } else {
-            ProjectorBlockEntityRenderer.onMainRendererRebuilt();
+            ProjectorBlockEntityRenderer.onMainRendererRebuilt(minecraft.levelRenderer);
             ProjectionRenderManager.onClientLevelChanged(currentLevel);
         }
         RemoteSceneClientManager.onMainLevelChanged(currentLevel);

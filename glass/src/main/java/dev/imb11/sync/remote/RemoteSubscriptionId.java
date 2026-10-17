@@ -27,11 +27,11 @@ public record RemoteSubscriptionId(ResourceKey<Level> projectorDimension, BlockP
     }
 
     public void write(RegistryFriendlyByteBuf buf) {
-        buf.writeIdentifier(projectorDimension.identifier());
+        buf.writeResourceLocation(projectorDimension.location());
         buf.writeBlockPos(projectorPos);
         buf.writeBoolean(preview);
         buf.writeUtf(source.channel(), ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
-        buf.writeIdentifier(source.dimension().identifier());
+        buf.writeResourceLocation(source.dimension().location());
         buf.writeBlockPos(source.pos());
         buf.writeEnum(source.facing());
         buf.writeVarLong(source.revision());
@@ -39,11 +39,11 @@ public record RemoteSubscriptionId(ResourceKey<Level> projectorDimension, BlockP
     }
 
     public static RemoteSubscriptionId read(RegistryFriendlyByteBuf buf) {
-        ResourceKey<Level> projectorDimension = ResourceKey.create(Registries.DIMENSION, buf.readIdentifier());
+        ResourceKey<Level> projectorDimension = ResourceKey.create(Registries.DIMENSION, buf.readResourceLocation());
         BlockPos projectorPos = buf.readBlockPos();
         boolean preview = buf.readBoolean();
         String channel = buf.readUtf(ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
-        ResourceKey<Level> sourceDimension = ResourceKey.create(Registries.DIMENSION, buf.readIdentifier());
+        ResourceKey<Level> sourceDimension = ResourceKey.create(Registries.DIMENSION, buf.readResourceLocation());
         BlockPos sourcePos = buf.readBlockPos();
         Direction facing = buf.readEnum(Direction.class);
         long revision = buf.readVarLong();

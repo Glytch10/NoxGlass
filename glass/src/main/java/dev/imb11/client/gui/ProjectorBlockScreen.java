@@ -42,7 +42,7 @@ public final class ProjectorBlockScreen extends ChannelScreen<ProjectorBlockGUI>
             return Component.literal("Not linked to a terminal");
         }
         return Component.literal("Terminal at " + channel.source().pos().toShortString()
-                + " (" + channel.source().dimension().identifier() + ")");
+                + " (" + channel.source().dimension().location() + ")");
     }
 
     @Override

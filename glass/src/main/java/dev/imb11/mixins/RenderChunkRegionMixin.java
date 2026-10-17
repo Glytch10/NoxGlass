@@ -1,7 +1,7 @@
 package dev.imb11.mixins;
 
 import dev.imb11.client.renderer.projection.ProjectionRenderRegion;
-import net.minecraft.client.renderer.chunk.RenderSectionRegion;
+import net.minecraft.client.renderer.chunk.RenderChunkRegion;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(RenderSectionRegion.class)
+@Mixin(RenderChunkRegion.class)
 abstract class RenderChunkRegionMixin implements ProjectionRenderRegion {
     @Unique
     private BlockPos glass$hiddenTerrainBlock;
@@ -21,11 +21,6 @@ abstract class RenderChunkRegionMixin implements ProjectionRenderRegion {
     @Override
     public void glass$setHiddenTerrainBlock(BlockPos position) {
         glass$hiddenTerrainBlock = position == null ? null : position.immutable();
-    }
-
-    @Override
-    public boolean glass$isProjection() {
-        return glass$hiddenTerrainBlock != null;
     }
 
     @Inject(method = "getBlockState", at = @At("HEAD"), cancellable = true)

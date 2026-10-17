@@ -3,7 +3,10 @@ package dev.imb11.client.remote;
 import com.mojang.logging.LogUtils;
 import dev.imb11.client.renderer.projection.ProjectionRenderContext;
 import dev.imb11.debug.RemoteSceneDiagnostics;
+import dev.imb11.client.renderer.projection.RenderResources;
 import dev.imb11.client.renderer.projection.ProjectionSections;
+import dev.imb11.mixins.LevelRendererBufferAccessor;
+import dev.imb11.mixins.LightTextureAccessor;
 import dev.imb11.sync.ProjectionSource;
 import dev.imb11.sync.remote.RemoteSubscriptionId;
 import dev.imb11.sync.remote.RemoteWorldState;
@@ -16,7 +19,8 @@ import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.client.renderer.LevelRenderer;
-import dev.imb11.client.renderer.projection.ProjectionLightmap;
+import net.minecraft.client.renderer.LightTexture;
+import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
 import net.minecraft.core.SectionPos;
@@ -28,6 +32,7 @@ import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
@@ -54,22 +59,25 @@ final class RemoteClientScene implements AutoCloseable {
     private static final int STORAGE_VIEW_DISTANCE = 2;
     private final boolean mainWorld;
     private final ProjectionSource source;
+    private final Minecraft minecraft;
     private final ResourceKey<DimensionType> dimensionType;
     private final boolean hardcore;
     private final boolean debug;
     private final boolean flat;
     private final long seedHash;
+    private final ClientLevel.ClientLevelData levelData;
+    private final RenderBuffers sinkRenderBuffers;
+    private final RemoteSceneSinkRenderer sinkRenderer;
     private final ClientLevel level;
     private final ClientChunkCache chunkCache;
     private final LevelLightEngine lightEngine;
-    private final ProjectionLightmap lightTexture;
+    private final LightTexture lightTexture;
     private final RemoteSceneEntities entities;
     private final Map<Long, LinkedHashSet<RemoteSubscriptionId>> chunkOwners = new LinkedHashMap<>();
     private final Map<RemoteSubscriptionId, Set<LevelRenderer>> renderers = new LinkedHashMap<>();
     private final LinkedHashSet<Long> deferredLightSections = new LinkedHashSet<>();
     private final Map<LevelRenderer, Set<Long>> pendingDirtySections = new IdentityHashMap<>();
     private RemoteWorldState state;
-    private int skyFlashTime;
     private boolean applying;
     private boolean closed;
 
@@ -81,16 +89,23 @@ final class RemoteClientScene implements AutoCloseable {
             boolean debug,
             boolean flat,
             long seedHash,
+            ClientLevel.ClientLevelData levelData,
+            RenderBuffers sinkRenderBuffers,
+            RemoteSceneSinkRenderer sinkRenderer,
             ClientLevel level,
-            ProjectionLightmap lightTexture,
+            LightTexture lightTexture,
             RemoteWorldState state
     ) {
         this.source = source;
+        this.minecraft = minecraft;
         this.dimensionType = dimensionType;
         this.hardcore = hardcore;
         this.debug = debug;
         this.flat = flat;
         this.seedHash = seedHash;
+        this.levelData = levelData;
+        this.sinkRenderBuffers = sinkRenderBuffers;
+        this.sinkRenderer = sinkRenderer;
         this.level = level;
         this.mainWorld = level == minecraft.level;
         this.chunkCache = level.getChunkSource();
@@ -103,16 +118,18 @@ final class RemoteClientScene implements AutoCloseable {
     static RemoteClientScene create(Minecraft minecraft, S2CRemoteSubscriptionPacket packet) {
         ClientPacketListener connection = Objects.requireNonNull(minecraft.getConnection());
         Holder<DimensionType> dimensionType = connection.registryAccess()
-                .lookupOrThrow(Registries.DIMENSION_TYPE)
-                .getOrThrow(packet.dimensionType());
+                .registryOrThrow(Registries.DIMENSION_TYPE)
+                .getHolderOrThrow(packet.dimensionType());
         if (minecraft.level != null && minecraft.level.dimension().equals(packet.subscription().source().dimension())) {
             return new RemoteClientScene(packet.subscription().source(), minecraft, packet.dimensionType(),
-                    packet.hardcore(), packet.debug(), packet.flat(), packet.seedHash(),
-                    minecraft.level, new ProjectionLightmap(), packet.state());
+                    packet.hardcore(), packet.debug(), packet.flat(), packet.seedHash(), null, null, null,
+                    minecraft.level, minecraft.gameRenderer.lightTexture(), packet.state());
         }
-        RemoteSceneSinkExtractor extractor = new RemoteSceneSinkExtractor(minecraft);
-        ProjectionLightmap lightTexture = null;
+        RenderBuffers renderBuffers = new RenderBuffers(1);
+        RemoteSceneSinkRenderer renderer = null;
+        LightTexture lightTexture = null;
         try {
+            renderer = new RemoteSceneSinkRenderer(minecraft, renderBuffers);
             ClientLevel.ClientLevelData levelData = new ClientLevel.ClientLevelData(packet.difficulty(), packet.hardcore(), packet.flat());
             ClientLevel level = new RemoteSceneLevel(
                     connection,
@@ -120,15 +137,15 @@ final class RemoteClientScene implements AutoCloseable {
                     packet.subscription().source().dimension(),
                     dimensionType,
                     STORAGE_VIEW_DISTANCE,
-                    extractor,
+                    minecraft::getProfiler,
+                    renderer,
                     packet.debug(),
-                    packet.seedHash(),
-                    packet.seaLevel()
+                    packet.seedHash()
             );
-            ChunkPos sourceChunk = ChunkPos.containing(packet.subscription().source().pos());
-            level.getChunkSource().updateViewCenter(sourceChunk.x(), sourceChunk.z());
+            ChunkPos sourceChunk = new ChunkPos(packet.subscription().source().pos());
+            level.getChunkSource().updateViewCenter(sourceChunk.x, sourceChunk.z);
             level.getChunkSource().updateViewRadius(STORAGE_VIEW_DISTANCE);
-            lightTexture = new ProjectionLightmap();
+            lightTexture = new LightTexture(minecraft.gameRenderer, minecraft);
             RemoteClientScene scene = new RemoteClientScene(
                     packet.subscription().source(),
                     minecraft,
@@ -137,19 +154,28 @@ final class RemoteClientScene implements AutoCloseable {
                     packet.debug(),
                     packet.flat(),
                     packet.seedHash(),
+                    levelData,
+                    renderBuffers,
+                    renderer,
                     level,
                     lightTexture,
                     packet.state()
             );
-            extractor.bind(scene);
+            renderer.bind(scene);
             scene.applyWorldState(packet.state());
             ProjectionRenderContext.registerRemoteLightUpdates(scene.chunkCache, scene::onLightUpdate);
             return scene;
         } catch (RuntimeException exception) {
             if (lightTexture != null) {
-                ProjectionLightmap failedProjectionLightmap = lightTexture;
-                cleanupCreation("light texture", () -> closeProjectionLightmap(failedProjectionLightmap));
+                LightTexture failedLightTexture = lightTexture;
+                cleanupCreation("light texture", () -> closeLightTexture(minecraft, failedLightTexture));
             }
+            if (renderer != null) {
+                RemoteSceneSinkRenderer failedRenderer = renderer;
+                cleanupCreation("renderer global buffers", () -> RenderResources.closeGlobalBuffers(failedRenderer));
+                cleanupCreation("sink renderer", failedRenderer::close);
+            }
+            cleanupCreation("render buffers", () -> closeRenderBuffers(renderBuffers));
             throw exception;
         }
     }
@@ -162,7 +188,7 @@ final class RemoteClientScene implements AutoCloseable {
         return level;
     }
 
-    ProjectionLightmap lightTexture() {
+    LightTexture lightTexture() {
         return lightTexture;
     }
 
@@ -172,8 +198,7 @@ final class RemoteClientScene implements AutoCloseable {
                 && hardcore == packet.hardcore()
                 && debug == packet.debug()
                 && flat == packet.flat()
-                && seedHash == packet.seedHash()
-                && level.getSeaLevel() == packet.seaLevel();
+                && seedHash == packet.seedHash();
     }
 
     void attachRenderer(RemoteSubscriptionId subscription, LevelRenderer renderer) {
@@ -185,7 +210,7 @@ final class RemoteClientScene implements AutoCloseable {
         if (!alreadyAttached && rendererActive(renderer)) {
             for (Map.Entry<Long, LinkedHashSet<RemoteSubscriptionId>> entry : chunkOwners.entrySet()) {
                 if (entry.getValue().contains(subscription)) {
-                    notifyRendererChunk(renderer, ChunkPos.unpack(entry.getKey()));
+                    notifyRendererChunk(renderer, new ChunkPos(entry.getKey()));
                 }
             }
         }
@@ -201,14 +226,14 @@ final class RemoteClientScene implements AutoCloseable {
     void setRegion(RemoteSubscriptionId subscription, ChunkPos center, int radius) {
         Set<ChunkPos> next = new ProjectionChunkRegion(center, radius).withNeighbors().chunks();
         for (ChunkPos pos : next) {
-            LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.computeIfAbsent(pos.pack(), ignored -> new LinkedHashSet<>());
+            LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.computeIfAbsent(pos.toLong(), ignored -> new LinkedHashSet<>());
             if (owners.isEmpty()) {
                 ProjectionChunkStorage.of(level).retain(pos);
             }
             owners.add(subscription);
         }
         for (long packed : List.copyOf(chunkOwners.keySet())) {
-            ChunkPos pos = ChunkPos.unpack(packed);
+            ChunkPos pos = new ChunkPos(packed);
             if (!next.contains(pos)) {
                 unloadChunk(subscription, pos);
             }
@@ -231,8 +256,8 @@ final class RemoteClientScene implements AutoCloseable {
             FriendlyByteBuf buffer = data.getReadBuffer();
             LevelChunk chunk;
             try {
-                chunk = storage.replace(level, pos.x(), pos.z(), buffer, data.getHeightmaps(),
-                        data.getBlockEntitiesTagsConsumer(pos.x(), pos.z()), false);
+                chunk = storage.replace(level, pos.x, pos.z, buffer, data.getHeightmaps(),
+                        data.getBlockEntitiesTagsConsumer(pos.x, pos.z), false);
             } finally {
                 buffer.release();
             }
@@ -252,7 +277,7 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     void unloadChunk(RemoteSubscriptionId subscription, ChunkPos pos) {
-        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.pack());
+        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.toLong());
         if (owners == null || !owners.contains(subscription)) {
             return;
         }
@@ -260,7 +285,7 @@ final class RemoteClientScene implements AutoCloseable {
             if (!ProjectionChunkStorage.of(level).vanilla(pos)) {
                 resetOwnersChunk(pos);
             }
-            chunkOwners.remove(pos.pack());
+            chunkOwners.remove(pos.toLong());
             ProjectionChunkStorage.of(level).release(level, pos);
         } else {
             owners.remove(subscription);
@@ -276,7 +301,7 @@ final class RemoteClientScene implements AutoCloseable {
     ) {
         ChunkPos pos = new ChunkPos(sectionX, sectionZ);
         if (closed || !ownedBy(subscription, pos) || ProjectionChunkStorage.of(level).vanilla(pos)
-                || sectionY < level.getMinSectionY() || sectionY > level.getMaxSectionY()) {
+                || sectionY < level.getMinSection() || sectionY >= level.getMaxSection()) {
             return;
         }
         updates.runUpdates((block, state) -> {
@@ -310,27 +335,29 @@ final class RemoteClientScene implements AutoCloseable {
         if (mainWorld) {
             return;
         }
-        level.setTimeFromServer(state.time().gameTime());
-        level.clockManager().handleUpdates(state.time().gameTime(), state.time().clockUpdates());
-        level.environmentAttributes().invalidateTickCache();
+        level.setGameTime(state.gameTime());
+        level.setDayTime(state.dayTime());
         level.setRainLevel(state.rainLevel());
         level.setThunderLevel(state.thunderLevel());
-        skyFlashTime = state.skyFlashTime();
-        level.setSkyFlashTime(skyFlashTime);
+        level.setSkyFlashTime(state.skyFlashTime());
+        levelData.setRaining(state.rainLevel() > 0.0F);
         level.updateSkyBrightness();
+        lightTexture.tick();
     }
 
     void advanceClock() {
         if (closed || mainWorld || state == null) {
             return;
         }
-        level.setTimeFromServer(level.getGameTime() + 1L);
-        level.clockManager().tick(level.getGameTime());
-        level.environmentAttributes().invalidateTickCache();
-        if (skyFlashTime > 0) {
-            level.setSkyFlashTime(--skyFlashTime);
+        level.setGameTime(level.getGameTime() + 1L);
+        if (state.tickDayTime()) {
+            level.setDayTime(level.getDayTime() + 1L);
+        }
+        if (level.getSkyFlashTime() > 0) {
+            level.setSkyFlashTime(level.getSkyFlashTime() - 1);
         }
         level.updateSkyBrightness();
+        lightTexture.tick();
         entities.tick();
     }
 
@@ -351,12 +378,12 @@ final class RemoteClientScene implements AutoCloseable {
     void applyBlockEntities(RemoteSubscriptionId subscription, List<ClientboundBlockEntityDataPacket> updates) {
         for (ClientboundBlockEntityDataPacket update : updates) {
             BlockPos pos = update.getPos();
-            if (closed || !ownedBy(subscription, ChunkPos.containing(pos)) || ProjectionChunkStorage.of(level).vanilla(ChunkPos.containing(pos))) {
+            if (closed || !ownedBy(subscription, new ChunkPos(pos)) || ProjectionChunkStorage.of(level).vanilla(new ChunkPos(pos))) {
                 continue;
             }
             var blockEntity = level.getBlockEntity(pos);
             if (blockEntity != null && blockEntity.getType() == update.getType()) {
-                blockEntity.loadWithComponents(net.minecraft.world.level.storage.TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING, level.registryAccess(), update.getTag()));
+                blockEntity.loadWithComponents(update.getTag(), level.registryAccess());
                 dirtyOwnersSection(SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getY()),
                         SectionPos.blockToSectionCoord(pos.getZ()), false);
             }
@@ -373,7 +400,7 @@ final class RemoteClientScene implements AutoCloseable {
         }
         for (int offsetX = -radius; offsetX <= radius; offsetX++) {
             for (int offsetZ = -radius; offsetZ <= radius; offsetZ++) {
-                ChunkPos pos = new ChunkPos(center.x() + offsetX, center.z() + offsetZ);
+                ChunkPos pos = new ChunkPos(center.x + offsetX, center.z + offsetZ);
                 if (!chunkPresent(pos) || !chunkLit(pos)) {
                     return false;
                 }
@@ -389,11 +416,11 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     private boolean chunkPresent(ChunkPos pos) {
-        return chunkCache.getChunk(pos.x(), pos.z(), ChunkStatus.FULL, false) != null && chunkOwners.containsKey(pos.pack());
+        return chunkCache.getChunk(pos.x, pos.z, ChunkStatus.FULL, false) != null && chunkOwners.containsKey(pos.toLong());
     }
 
     private boolean chunkLit(ChunkPos pos) {
-        return lightEngine.lightOnInColumn(SectionPos.of(pos, 0).asLong());
+        return lightEngine.lightOnInSection(SectionPos.of(pos, level.getMinSection()));
     }
 
     void releaseSubscription(RemoteSubscriptionId subscription) {
@@ -401,7 +428,7 @@ final class RemoteClientScene implements AutoCloseable {
         List<ChunkPos> owned = new ArrayList<>();
         for (Map.Entry<Long, LinkedHashSet<RemoteSubscriptionId>> entry : chunkOwners.entrySet()) {
             if (entry.getValue().contains(subscription)) {
-                owned.add(ChunkPos.unpack(entry.getKey()));
+                owned.add(new ChunkPos(entry.getKey()));
             }
         }
         for (ChunkPos pos : owned) {
@@ -409,7 +436,7 @@ final class RemoteClientScene implements AutoCloseable {
         }
     }
 
-    void dirtyBlock(BlockPos pos) {
+    void dirtyBlock(BlockPos pos, BlockState oldState, BlockState newState) {
         if (!applying && !closed) {
             dirtyBlocks(pos.getX(), pos.getY(), pos.getZ(), pos.getX(), pos.getY(), pos.getZ());
         }
@@ -443,6 +470,12 @@ final class RemoteClientScene implements AutoCloseable {
     void dirtySection(int sectionX, int sectionY, int sectionZ) {
         if (!applying && !closed) {
             dirtyOwnersSection(sectionX, sectionY, sectionZ, false);
+        }
+    }
+
+    void chunkLoaded(ChunkPos pos) {
+        if (!applying && !closed) {
+            notifyOwnersChunk(pos);
         }
     }
 
@@ -509,7 +542,7 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     private boolean ownedBy(RemoteSubscriptionId subscription, ChunkPos pos) {
-        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.pack());
+        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.toLong());
         return owners != null && owners.contains(subscription);
     }
 
@@ -520,14 +553,15 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     private void notifyRendererChunk(LevelRenderer renderer, ChunkPos pos) {
+        renderer.onChunkLoaded(pos);
         queueDirtyChunk(renderer, pos, true);
     }
 
     private void queueDirtyChunk(LevelRenderer renderer, ChunkPos pos, boolean neighbors) {
         int padding = neighbors ? 1 : 0;
-        for (int x = pos.x() - padding; x <= pos.x() + padding; x++) {
-            for (int z = pos.z() - padding; z <= pos.z() + padding; z++) {
-                for (int y = level.getMinSectionY(); y <= level.getMaxSectionY(); y++) {
+        for (int x = pos.x - padding; x <= pos.x + padding; x++) {
+            for (int z = pos.z - padding; z <= pos.z + padding; z++) {
+                for (int y = level.getMinSection(); y < level.getMaxSection(); y++) {
                     queueDirtySection(renderer, x, y, z, false);
                 }
             }
@@ -571,7 +605,7 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     private Set<LevelRenderer> ownerRenderers(ChunkPos pos) {
-        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.pack());
+        LinkedHashSet<RemoteSubscriptionId> owners = chunkOwners.get(pos.toLong());
         if (owners == null || owners.isEmpty()) {
             return Set.of();
         }
@@ -587,7 +621,7 @@ final class RemoteClientScene implements AutoCloseable {
     }
 
     private static boolean rendererActive(LevelRenderer renderer) {
-        return renderer.viewArea() != null;
+        return ((LevelRendererBufferAccessor) renderer).glass$getViewArea() != null;
     }
 
     @Override
@@ -600,7 +634,7 @@ final class RemoteClientScene implements AutoCloseable {
         cleanup("entities", entities::clear);
         cleanup("chunk and light storage", () -> {
             for (long packed : List.copyOf(chunkOwners.keySet())) {
-                ProjectionChunkStorage.of(level).release(level, ChunkPos.unpack(packed));
+                ProjectionChunkStorage.of(level).release(level, new ChunkPos(packed));
             }
         });
         if (!mainWorld) {
@@ -618,7 +652,10 @@ final class RemoteClientScene implements AutoCloseable {
             return;
         }
         cleanup("tint caches", level::clearTintCaches);
-        cleanup("light texture", () -> closeProjectionLightmap(lightTexture));
+        cleanup("light texture", () -> closeLightTexture(minecraft, lightTexture));
+        cleanup("renderer global buffers", () -> RenderResources.closeGlobalBuffers(sinkRenderer));
+        cleanup("sink renderer", sinkRenderer::close);
+        cleanup("render buffers", () -> closeRenderBuffers(sinkRenderBuffers));
     }
 
     private void resetOwnersChunk(ChunkPos pos) {
@@ -627,8 +664,12 @@ final class RemoteClientScene implements AutoCloseable {
         }
     }
 
-    private static void closeProjectionLightmap(ProjectionLightmap lightTexture) {
-        lightTexture.close();
+    private static void closeLightTexture(Minecraft minecraft, LightTexture lightTexture) {
+        try {
+            minecraft.getTextureManager().release(((LightTextureAccessor) lightTexture).glass$getLightTextureLocation());
+        } finally {
+            lightTexture.close();
+        }
     }
 
     private void cleanup(String resource, Runnable operation) {
@@ -645,5 +686,10 @@ final class RemoteClientScene implements AutoCloseable {
         } catch (RuntimeException exception) {
             LOGGER.warn("Failed to close incomplete remote scene {}", resource, exception);
         }
+    }
+
+    private static void closeRenderBuffers(RenderBuffers renderBuffers) {
+        RenderResources.closeBufferBuilders(renderBuffers);
+        RenderResources.closeAvailablePoolBuffers(renderBuffers.sectionBufferPool());
     }
 }

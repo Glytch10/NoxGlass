@@ -1,7 +1,8 @@
 package dev.imb11.debug;
 
+import dev.imb11.mixins.LevelRendererBufferAccessor;
 import dev.imb11.sync.ProjectionSource;
-import dev.imb11.client.renderer.projection.ProjectionLevelRenderer;
+import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.ChunkPos;
@@ -46,7 +47,7 @@ public record FeedDiagnostics(
             boolean compileQueueEmpty,
             String buildQueue
     ) {
-        public static SectionStats of(@Nullable ProjectionLevelRenderer renderer, Predicate<ChunkPos> chunkReady) {
+        public static SectionStats of(@Nullable LevelRenderer renderer, Predicate<ChunkPos> chunkReady) {
             if (renderer == null) {
                 return new SectionStats(0, 0, 0, null, false, false, "none");
             }
@@ -54,21 +55,21 @@ public record FeedDiagnostics(
             int dirty = 0;
             int uncompiled = 0;
             BlockPos firstBlocked = null;
-            for (SectionRenderDispatcher.RenderSection section : renderer.visibleSections()) {
+            for (SectionRenderDispatcher.RenderSection section : ((LevelRendererBufferAccessor) renderer).glass$getVisibleSections()) {
                 visible++;
-                if (renderer.isSectionDirty(section)) {
+                if (section.isDirty()) {
                     dirty++;
                 }
-                if (section.getSectionMesh() == net.minecraft.client.renderer.chunk.CompiledSectionMesh.UNCOMPILED) {
+                if (section.getCompiled() == SectionRenderDispatcher.CompiledSection.UNCOMPILED) {
                     uncompiled++;
                     if (firstBlocked == null) {
-                        firstBlocked = section.getRenderOrigin().immutable();
+                        firstBlocked = section.getOrigin().immutable();
                     }
                 }
             }
             return new SectionStats(visible, dirty, uncompiled, firstBlocked,
-                    firstBlocked != null && chunkReady.test(ChunkPos.containing(firstBlocked)),
-                    renderer.hasRenderedAllSections(), renderer.sectionStatistics());
+                    firstBlocked != null && chunkReady.test(new ChunkPos(firstBlocked)),
+                    renderer.hasRenderedAllSections(), renderer.getSectionStatistics());
         }
 
         @Override
