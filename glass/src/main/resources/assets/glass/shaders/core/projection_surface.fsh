@@ -113,20 +113,7 @@ vec3 projectionColor(int index) {
     return staticAmount > 0.0 ? mix(projection, staticNoise(), staticAmount) : projection;
 }
 
-void main() {
-    vec4 visible = projectionMask * step(revealDistances, RevealProgress);
-    if (LoadingOpacity >= 0.0) {
-        if (dot(visible, vec4(1.0)) > 0.0) {
-            discard;
-        }
-        fragColor = vec4(1.0, 1.0, 1.0, LoadingOpacity);
-        return;
-    }
-
-    if (dot(visible, vec4(1.0)) == 0.0) {
-        discard;
-    }
-
+vec4 projectedColor(vec4 visible) {
     vec3 positions[4] = vec3[4](ProjectorPosition0, ProjectorPosition1, ProjectorPosition2, ProjectorPosition3);
     vec4 selected = visible;
     vec4 whiteOpacity = clamp(vec4(1.0) - (RevealProgress - revealDistances) * 0.5, 0.0, 1.0);
@@ -169,5 +156,21 @@ void main() {
             totalWeight += weight;
         }
     }
-    fragColor = vec4(color / max(totalWeight, 0.0001), 1.0);
+    return vec4(color / max(totalWeight, 0.0001), 1.0);
+}
+
+void main() {
+    vec4 visible = projectionMask * step(revealDistances, RevealProgress);
+    bool anyVisible = dot(visible, vec4(1.0)) > 0.0;
+    if (LoadingOpacity >= 0.0) {
+        if (anyVisible) {
+            discard;
+        }
+        fragColor = vec4(1.0, 1.0, 1.0, LoadingOpacity);
+    } else {
+        if (!anyVisible) {
+            discard;
+        }
+        fragColor = projectedColor(visible);
+    }
 }

@@ -11,7 +11,11 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.SheetedDecalTextureGenerator;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.blaze3d.vertex.VertexBuffer;
+import dev.imb11.client.ClientSourcePoses;
 import dev.imb11.client.compat.IrisCompatibility;
+import dev.imb11.client.compat.SableRenderCompatibility;
+import dev.imb11.compat.SableCompatibility;
+import dev.imb11.sync.SourcePose;
 import dev.imb11.client.remote.RemoteSceneClientManager;
 import dev.imb11.debug.FeedDiagnostics;
 import dev.imb11.debug.FeedTrace;
@@ -150,7 +154,8 @@ public final class ProjectionRenderManager {
 
         ProjectionView view = ProjectionView.create(currentLevel.dimension(), projectorPos, surface);
         PortalSide side = portalSide(view);
-        side.track(view, minecraft.gameRenderer.getMainCamera().getPosition(), frameSequence);
+        side.track(view, SableCompatibility.toLocalPosition(currentLevel, projectorPos,
+                minecraft.gameRenderer.getMainCamera().getPosition()), frameSequence);
         FeedKey key = new FeedKey(source.key(), view.dimension(), view.projectorPos(), false);
         closeFeeds(other -> !other.key.equals(key) && !other.key.preview()
                 && other.key.projectorDimension().equals(key.projectorDimension())
@@ -275,7 +280,8 @@ public final class ProjectionRenderManager {
             ProjectionView combined = new ProjectionView(anchor.dimension(), anchor.projectorPos(),
                     anchor.origin(), anchor.facing(), anchor.uDirection(), anchor.vDirection(),
                     List.copyOf(faces.values()), bounds);
-            alignment.side.track(combined, viewer, frameSequence);
+            alignment.side.track(combined, SableCompatibility.toLocalPosition(activeLevel, anchor.projectorPos(), viewer),
+                    frameSequence);
             alignment.planar = combined.planar();
             for (ProjectionFeed feed : connected) {
                 if (feed.alignment != alignment) {
@@ -484,7 +490,8 @@ public final class ProjectionRenderManager {
             if (FEEDS.get(feed.key) != feed) {
                 continue;
             }
-            feed.side.update(viewerPosition, frameSequence);
+            feed.side.update(SableCompatibility.toLocalPosition(currentLevel, feed.view.projectorPos(), viewerPosition),
+                    frameSequence);
             long requestAge = frameSequence - feed.lastRequestFrame;
             long retention = feed.key.preview() ? PREVIEW_RETENTION_NANOS : FEED_RETENTION_NANOS;
             if (feed.lastRequestFrame < 0L || System.nanoTime() - feed.lastRequestNanos > retention) {
@@ -515,9 +522,17 @@ public final class ProjectionRenderManager {
                 continue;
             }
 
+            SourceFrame destination = sourceFrame(feed.source, partialTick);
+            if (destination == null) {
+                feed.stage = ProjectionStage.WAITING_FOR_SOURCE_POSE;
+                markUnavailable(feed, mainTarget);
+                continue;
+            }
+
             try {
                 PortalView portalView = configurePortalCamera(
                         feed,
+                        destination,
                         viewerCamera,
                         mainProjection,
                         mainTarget
@@ -650,7 +665,7 @@ public final class ProjectionRenderManager {
             }
             ChunkPos cameraChunk = new ChunkPos(BlockPos.containing(feed.cameraPosition));
             resetUnloadedChunkSections(feed, chunkPos);
-            if (chunkPos.equals(new ChunkPos(feed.source.pos()))
+            if (chunkPos.equals(new ChunkPos(BlockPos.containing(feed.sourceCenter)))
                     || chunkPos.equals(cameraChunk)) {
                 feed.ready = false;
             }
@@ -1053,6 +1068,8 @@ public final class ProjectionRenderManager {
                     }
                     renderLayer(feed.renderer(), layer, cameraPosition, modelView, projection, target);
                 }
+                SableRenderCompatibility.renderAfterSections(level, cameraPosition, modelView, projection, partialTick);
+                restoreProjectionTarget(target);
 
                 if (minecraft.options.getCloudsType() != CloudStatus.OFF) {
                     renderer.renderClouds(
@@ -1159,6 +1176,8 @@ public final class ProjectionRenderManager {
                     poses.popPose();
                 }
             }
+            SableRenderCompatibility.renderBlockEntities(feed.level(), blockDispatcher, buffers, position, partialTick,
+                    blockEntity -> blockEntity instanceof ProjectorBlockEntity || blockEntity.getBlockPos().equals(feed.source.pos()));
             buffers.endBatch();
             renderBlockBreaking(minecraft, feed, poses, position);
         } finally {
@@ -1227,18 +1246,21 @@ public final class ProjectionRenderManager {
 
     private static PortalView configurePortalCamera(
             ProjectionFeed feed,
+            SourceFrame destination,
             Camera viewerCamera,
             Matrix4f mainProjection,
             RenderTarget mainTarget
     ) {
+        feed.sourceCenter = destination.center();
         if (feed.previewAspect > 0) {
             Direction facing = feed.source.facing().getAxis().isHorizontal() ? feed.source.facing().getOpposite() : Direction.SOUTH;
-            Vec3 look = directionVector(facing);
-            Vec3 up = directionVector(Direction.UP);
-            Vec3 position = cameraPosition(feed.source);
+            Vec3 look = destination.rotate(directionVector(facing));
+            Vec3 up = destination.rotate(directionVector(Direction.UP));
+            Vec3 position = destination.cameraPosition();
             double elapsedSeconds = (System.nanoTime() - feed.previewStartedNanos) / 1_000_000_000.0;
             float yaw = (float) (elapsedSeconds * Math.PI / 60.0 % (Math.PI * 2));
-            Quaternionf rotation = new Quaternionf().rotationY(yaw)
+            Quaternionf rotation = new Quaternionf(destination.orientation()).rotateY(yaw)
+                    .mul(new Quaternionf(destination.orientation()).conjugate())
                     .mul(frameRotation(look.cross(up), up, look.scale(-1)))
                     .rotateX((float) Math.toRadians(-10));
             Matrix4f projection = new Matrix4f().perspective((float) Math.toRadians(85), feed.previewAspect, 0.05F, 1024.0F);
@@ -1252,17 +1274,18 @@ public final class ProjectionRenderManager {
         PortalSide portalSide = feed.alignment == null ? feed.side : feed.alignment.side;
         boolean planar = feed.alignment == null ? feed.view.planar() : feed.alignment.planar;
         Vec3 surfaceNormal = view.normal();
-        Vec3 viewerOffset = viewerCamera.getPosition().subtract(
+        Vec3 viewerPosition = SableCompatibility.toLocalPosition(activeLevel, view.projectorPos(), viewerCamera.getPosition());
+        Quaternionf viewerRotation = SableCompatibility.toLocalRotation(activeLevel, view.projectorPos(),
+                new Quaternionf(viewerCamera.rotation()));
+        Vec3 viewerOffset = viewerPosition.subtract(
                 Vec3.atCenterOf(view.projectorPos()).add(surfaceNormal.scale(PORTAL_MAPPING_OFFSET)));
-        double side = portalSide.resolve(view, viewerCamera.getPosition());
+        double side = portalSide.resolve(view, viewerPosition);
         Vec3 sourceRight = directionVector(view.uDirection()).scale(side);
         Vec3 sourceUp = directionVector(view.vDirection());
         Vec3 sourceBack = surfaceNormal.scale(side);
 
-        Vec3 destinationLook = directionVector(feed.source.facing().getOpposite());
-        Vec3 destinationUp = feed.source.facing().getAxis().isHorizontal()
-                ? directionVector(Direction.UP)
-                : directionVector(Direction.NORTH);
+        Vec3 destinationLook = destination.look();
+        Vec3 destinationUp = destination.up();
         Vec3 destinationRight = destinationLook.cross(destinationUp);
         Vec3 destinationBack = destinationLook.scale(-1.0D);
 
@@ -1271,14 +1294,14 @@ public final class ProjectionRenderManager {
         Quaternionf portalRotation = new Quaternionf(destinationFrame)
                 .mul(new Quaternionf(sourceFrame).conjugate());
         Quaternionf cameraRotation = portalRotation
-                .mul(new Quaternionf(viewerCamera.rotation()))
+                .mul(viewerRotation)
                 .normalize();
 
         double horizontalOffset = viewerOffset.dot(sourceRight);
         double verticalOffset = viewerOffset.dot(sourceUp);
         double normalOffset = viewerOffset.dot(sourceBack);
-        Vec3 destinationAnchor = cameraPosition(feed.source);
-        Vec3 dynamicPosition = Vec3.atCenterOf(feed.source.pos()).add(destinationLook.scale(PORTAL_MAPPING_OFFSET))
+        Vec3 destinationAnchor = destination.cameraPosition();
+        Vec3 dynamicPosition = destination.center().add(destinationLook.scale(PORTAL_MAPPING_OFFSET))
                 .add(destinationRight.scale(horizontalOffset))
                 .add(destinationUp.scale(verticalOffset))
                 .add(destinationBack.scale(normalOffset));
@@ -1632,13 +1655,43 @@ public final class ProjectionRenderManager {
         }
     }
 
-    private static Vec3 cameraPosition(ProjectionSource source) {
-        Direction facing = source.facing().getOpposite();
-        return Vec3.atCenterOf(source.pos()).add(
-                facing.getStepX() * CAMERA_FACE_OFFSET,
-                facing.getStepY() * CAMERA_FACE_OFFSET,
-                facing.getStepZ() * CAMERA_FACE_OFFSET
-        );
+    @Nullable
+    private static SourceFrame sourceFrame(ProjectionSource source, float partialTick) {
+        if (!ClientSourcePoses.isOnSubLevel(source)) {
+            return new SourceFrame(source, Vec3.atCenterOf(source.pos()), new Quaternionf());
+        }
+        SourcePose pose = ClientSourcePoses.resolve(source, partialTick);
+        return pose == null ? null : new SourceFrame(source, pose.position(), pose.orientation());
+    }
+
+    private record SourceFrame(ProjectionSource source, Vec3 center, Quaternionf orientation) {
+        private SourceFrame {
+            orientation = new Quaternionf(orientation);
+        }
+
+        @Override
+        public Quaternionf orientation() {
+            return new Quaternionf(orientation);
+        }
+
+        private Vec3 rotate(Vec3 direction) {
+            Vector3f rotated = new Vector3f((float) direction.x, (float) direction.y, (float) direction.z).rotate(orientation);
+            return new Vec3(rotated.x, rotated.y, rotated.z);
+        }
+
+        private Vec3 look() {
+            return rotate(directionVector(source.facing().getOpposite()));
+        }
+
+        private Vec3 up() {
+            return rotate(source.facing().getAxis().isHorizontal()
+                    ? directionVector(Direction.UP)
+                    : directionVector(Direction.NORTH));
+        }
+
+        private Vec3 cameraPosition() {
+            return center.add(look().scale(CAMERA_FACE_OFFSET));
+        }
     }
 
     private record FeedKey(
@@ -1701,6 +1754,7 @@ public final class ProjectionRenderManager {
         private ProjectionView view;
         private ProjectionAlignment alignment;
         private Vec3 cameraPosition;
+        private Vec3 sourceCenter;
         private long lastRequestFrame = -1L;
         private long lastRequestNanos;
         private long lastVisibleFrame = -1L;
@@ -1732,7 +1786,9 @@ public final class ProjectionRenderManager {
             this.view = view;
             this.side = side;
             this.textureLocation = textureLocation;
-            this.cameraPosition = ProjectionRenderManager.cameraPosition(source);
+            SourceFrame frame = sourceFrame(source, 1.0F);
+            this.sourceCenter = frame == null ? Vec3.atCenterOf(source.pos()) : frame.center();
+            this.cameraPosition = frame == null ? sourceCenter : frame.cameraPosition();
         }
 
         public ProjectionSource source() {

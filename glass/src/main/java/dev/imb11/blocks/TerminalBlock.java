@@ -60,7 +60,12 @@ public class TerminalBlock extends BaseEntityBlock {
     @Override
     protected void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean movedByPiston) {
         if (level instanceof ServerLevel serverLevel && !state.is(newState.getBlock())) {
-            ChannelManagerPersistence.get(serverLevel).unlinkTerminal(serverLevel, pos);
+            ChannelManagerPersistence channels = ChannelManagerPersistence.get(serverLevel);
+            if (movedByPiston) {
+                channels.beginTerminalMove(serverLevel, pos);
+            } else {
+                channels.unlinkTerminal(serverLevel, pos);
+            }
         }
         super.onRemove(state, level, pos, newState, movedByPiston);
     }

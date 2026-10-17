@@ -11,6 +11,7 @@ import dev.imb11.debug.ProjectorActivationTrace;
 import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.client.ClientProjectionSourceRegistry;
 import dev.imb11.client.ShaderRegistrar;
+import dev.imb11.compat.SableCompatibility;
 import dev.imb11.client.renderer.projection.ProjectionRenderManager;
 import dev.imb11.client.renderer.projection.ProjectionSurfaceRenderer;
 import dev.imb11.client.renderer.projection.ProjectionStage;
@@ -87,6 +88,10 @@ public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<Project
         return VIEW_DISTANCE;
     }
 
+    public AABB getRenderBoundingBox(ProjectorBlockEntity entity) {
+        return renderBounds(entity, entity.getProjectionSurface());
+    }
+
     @Override
     public boolean shouldRender(ProjectorBlockEntity entity, Vec3 cameraPosition) {
         if (!(entity.getLevel() instanceof ClientLevel clientLevel) || entity.isRemoved()) {
@@ -155,7 +160,8 @@ public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<Project
         if (projectors == null || minecraft.player == null) {
             return;
         }
-        Vec3 viewer = minecraft.gameRenderer.getMainCamera().getPosition();
+        Vec3 camera = minecraft.gameRenderer.getMainCamera().getPosition();
+        Map<ProjectorBlockEntity, Vec3> viewers = new IdentityHashMap<>();
         List<ProjectorBlockEntity> nearby = new ArrayList<>();
         for (ProjectorBlockEntity projector : projectors.values()) {
             projector.setClientProjectionReady(false);
@@ -169,6 +175,7 @@ public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<Project
                 ProjectorActivationTrace.report(projector, ProjectionStage.MISSING_CHANNEL_SOURCE, null);
                 continue;
             }
+            Vec3 viewer = SableCompatibility.toLocalPosition(level, projector.getBlockPos(), camera);
             if (distanceToSqr(new AABB(projector.getBlockPos()).inflate(ProjectionSurface.MAX_RADIUS), viewer)
                     > VIEW_DISTANCE_SQUARED) {
                 ProjectorActivationTrace.report(projector, ProjectionStage.OUTSIDE_PRELOAD_RANGE, null);
@@ -178,12 +185,13 @@ public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<Project
             ProjectionSurface surface = projector.getProjectionSurface();
             if (surface != null && distanceToSqr(surface.renderBounds(), viewer) <= VIEW_DISTANCE_SQUARED) {
                 nearby.add(projector);
+                viewers.put(projector, viewer);
             } else {
                 ProjectorActivationTrace.report(projector, surface == null ? ProjectionStage.MISSING_SURFACE : ProjectionStage.OUTSIDE_SURFACE_RANGE, null);
             }
         }
         nearby.sort(Comparator.comparing((ProjectorBlockEntity projector) -> !projector.isProjectionVisible())
-                .thenComparingDouble(projector -> distanceToSqr(projector.getProjectionSurface().renderBounds(), viewer))
+                .thenComparingDouble(projector -> distanceToSqr(projector.getProjectionSurface().renderBounds(), viewers.get(projector)))
                 .thenComparingLong(projector -> projector.getBlockPos().asLong()));
         for (ProjectorBlockEntity projector : nearby) {
             ProjectionRenderManager.ProjectionFeed feed = ProjectionRenderManager.requestFeed(
@@ -246,7 +254,7 @@ public class ProjectorBlockEntityRenderer implements BlockEntityRenderer<Project
         if (!entity.claimRenderFrame(frame)) {
             return;
         }
-        if (!currentFrustum(clientLevel, frame).isVisible(renderBounds)) {
+        if (!currentFrustum(clientLevel, frame).isVisible(SableCompatibility.toWorldBounds(clientLevel, entity.getBlockPos(), renderBounds))) {
             return;
         }
 

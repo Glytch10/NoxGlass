@@ -3,6 +3,7 @@ package dev.imb11.sync;
 import dev.imb11.blocks.GBlocks;
 import dev.imb11.blocks.TerminalBlock;
 import dev.imb11.blocks.entity.TerminalBlockEntity;
+import dev.imb11.compat.SableCompatibility;
 import dev.imb11.sync.packets.S2CChannelSnapshotPacket;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.core.BlockPos;
@@ -41,6 +42,7 @@ public final class ChannelManagerPersistence extends SavedData {
     public static final SavedData.Factory<ChannelManagerPersistence> TYPE = new SavedData.Factory<>(ChannelManagerPersistence::new, ChannelManagerPersistence::gather, null);
     private static final SavedData.Factory<LegacyChannelData> LEGACY_TYPE = new SavedData.Factory<>(LegacyChannelData::new, LegacyChannelData::gather, null);
     private static final String DATA_ID = "glass_channels";
+    private static final int TERMINAL_MOVE_TICKS = 20;
 
     private final Map<String, Channel> channels = new LinkedHashMap<>();
     private final Map<String, PendingLink> pendingLinks = new LinkedHashMap<>();
@@ -48,6 +50,9 @@ public final class ChannelManagerPersistence extends SavedData {
     private long registryRevision;
     private transient MinecraftServer server;
     private final Map<String, ProjectionActivity> projectionActivity = new HashMap<>();
+    private final Map<String, TrackedPose> sourcePoses = new HashMap<>();
+    private final Map<String, TrackedPose> broadcastPoses = new HashMap<>();
+    private final Map<String, MovingTerminal> movingTerminals = new HashMap<>();
 
     public static ChannelManagerPersistence get(Level level) {
         if (!(level instanceof ServerLevel serverLevel)) {
@@ -108,6 +113,56 @@ public final class ChannelManagerPersistence extends SavedData {
             resolve(name).ifPresent(source -> projectionActivity.put(source.channel(),
                     new ProjectionActivity(source, server.getTickCount())));
         }
+    }
+
+    @Nullable
+    public SourcePose sourcePose(ProjectionSource source) {
+        TrackedPose tracked = sourcePoses.get(source.channel());
+        return tracked != null && tracked.source().equals(source.key()) ? tracked.pose() : null;
+    }
+
+    public List<TrackedPose> sourcePoses() {
+        return List.copyOf(sourcePoses.values());
+    }
+
+    public void tickSourcePoses() {
+        if (server == null) {
+            return;
+        }
+        for (Channel channel : channels.values()) {
+            ProjectionSource source = channel.source();
+            if (source == null) {
+                continue;
+            }
+            ServerLevel level = server.getLevel(source.dimension());
+            if (level == null || !SableCompatibility.isOnSubLevel(level, source.pos()) || !level.hasChunkAt(source.pos())) {
+                continue;
+            }
+            SourcePose pose = SableCompatibility.sourcePose(level, source.pos());
+            if (pose == null) {
+                continue;
+            }
+            TrackedPose previous = sourcePoses.get(channel.name());
+            if (previous == null || !previous.source().equals(source.key()) || !previous.pose().closeTo(pose)) {
+                sourcePoses.put(channel.name(), new TrackedPose(source.key(), pose));
+                setDirty();
+            }
+        }
+        expireTerminalMoves();
+        broadcastSourcePoses();
+    }
+
+    public void beginTerminalMove(ServerLevel level, BlockPos pos) {
+        String channel = sourceChannelAt(level.dimension(), pos);
+        boolean pending = channel == null;
+        if (pending) {
+            channel = pendingChannelAt(level.dimension(), pos);
+        }
+        if (channel == null || server == null) {
+            unlinkTerminal(level, pos);
+            return;
+        }
+        movingTerminals.put(channel, new MovingTerminal(level.dimension(), pos.immutable(), pending, server.getTickCount()));
     }
 
     public boolean isProjecting(ServerLevel level, BlockPos pos, String name) {
@@ -240,6 +295,9 @@ public final class ChannelManagerPersistence extends SavedData {
         if (desired == null) {
             desired = pendingChannelAt(level.dimension(), pos);
         }
+        if (desired == null && completeTerminalMove(level, pos, terminal.getChannel())) {
+            desired = terminal.getChannel();
+        }
 
         if (desired == null) {
             terminal.setChannelFromServer("");
@@ -266,6 +324,10 @@ public final class ChannelManagerPersistence extends SavedData {
                 writeLocation(item, source.dimension(), source.pos());
                 item.putString("linked_facing", source.facing().getSerializedName());
                 item.putLong("source_revision", source.revision());
+                TrackedPose tracked = sourcePoses.get(channel.name());
+                if (tracked != null && tracked.source().equals(source.key())) {
+                    item.put("linked_pose", tracked.pose().save());
+                }
             } else if (pending != null) {
                 writeLocation(item, pending.dimension(), pending.pos());
             }
@@ -300,7 +362,12 @@ public final class ChannelManagerPersistence extends SavedData {
             if (pos != null && dimension != null && facing != null) {
                 long sourceRevision = Math.max(0L, item.getLong("source_revision"));
                 persistence.registryRevision = Math.max(persistence.registryRevision, sourceRevision);
-                loadedChannels.put(name, new Channel(name, new ProjectionSource(name, dimension, pos, facing, sourceRevision)));
+                ProjectionSource source = new ProjectionSource(name, dimension, pos, facing, sourceRevision);
+                loadedChannels.put(name, new Channel(name, source));
+                SourcePose pose = item.contains("linked_pose", Tag.TAG_COMPOUND) ? SourcePose.load(item.getCompound("linked_pose")) : null;
+                if (pose != null) {
+                    persistence.sourcePoses.put(name, new TrackedPose(source.key(), pose));
+                }
                 loadedPending.remove(name);
             } else {
                 loadedChannels.put(name, new Channel(name, null));
@@ -411,6 +478,10 @@ public final class ChannelManagerPersistence extends SavedData {
             Channel channel = channels.get(entry.getKey());
             return channel == null || !entry.getValue().source().equals(channel.source());
         });
+        sourcePoses.entrySet().removeIf(entry -> {
+            Channel channel = channels.get(entry.getKey());
+            return channel == null || channel.source() == null || !entry.getValue().source().equals(channel.source().key());
+        });
         registryRevision = revision;
         setDirty();
         if (server != null) {
@@ -420,6 +491,76 @@ public final class ChannelManagerPersistence extends SavedData {
 
     private long nextRevision() {
         return registryRevision == Long.MAX_VALUE ? Long.MAX_VALUE : registryRevision + 1L;
+    }
+
+    private boolean completeTerminalMove(ServerLevel level, BlockPos pos, String carried) {
+        MovingTerminal moving = carried.isEmpty() ? null : movingTerminals.get(carried);
+        Channel channel = moving == null ? null : channels.get(carried);
+        if (channel == null || sameLocation(moving.dimension(), moving.pos(), level.dimension(), pos)) {
+            return false;
+        }
+        PendingLink pending = pendingLinks.get(carried);
+        boolean stillOwned = moving.pending()
+                ? channel.source() == null && pending != null && sameLocation(pending.dimension(), pending.pos(), moving.dimension(), moving.pos())
+                : channel.source() != null && sameLocation(channel.source().dimension(), channel.source().pos(), moving.dimension(), moving.pos());
+        movingTerminals.remove(carried);
+        if (!stillOwned) {
+            return false;
+        }
+        BlockPos immutablePos = pos.immutable();
+        for (Map.Entry<String, Channel> entry : channels.entrySet()) {
+            ProjectionSource source = entry.getValue().source();
+            if (source != null && !entry.getKey().equals(carried) && sameLocation(source.dimension(), source.pos(), level.dimension(), immutablePos)) {
+                entry.setValue(new Channel(entry.getKey(), null));
+            }
+        }
+        pendingLinks.entrySet().removeIf(entry -> !entry.getKey().equals(carried)
+                && sameLocation(entry.getValue().dimension(), entry.getValue().pos(), level.dimension(), immutablePos));
+        long revision = nextRevision();
+        if (moving.pending()) {
+            pendingLinks.put(carried, new PendingLink(level.dimension(), immutablePos));
+        } else {
+            channels.put(carried, new Channel(carried, new ProjectionSource(carried, level.dimension(), immutablePos,
+                    channel.source().facing(), revision)));
+        }
+        commit(revision);
+        return true;
+    }
+
+    private void expireTerminalMoves() {
+        if (server == null || movingTerminals.isEmpty()) {
+            return;
+        }
+        int now = server.getTickCount();
+        for (Map.Entry<String, MovingTerminal> entry : List.copyOf(movingTerminals.entrySet())) {
+            MovingTerminal moving = entry.getValue();
+            if (now - moving.tick() < TERMINAL_MOVE_TICKS) {
+                continue;
+            }
+            movingTerminals.remove(entry.getKey());
+            ServerLevel level = server.getLevel(moving.dimension());
+            if (level != null && !(level.hasChunkAt(moving.pos()) && level.getBlockState(moving.pos()).is(GBlocks.TERMINAL))) {
+                unlinkTerminal(level, moving.pos());
+            }
+        }
+    }
+
+    private void broadcastSourcePoses() {
+        for (Map.Entry<String, TrackedPose> entry : sourcePoses.entrySet()) {
+            TrackedPose sent = broadcastPoses.get(entry.getKey());
+            TrackedPose current = entry.getValue();
+            if (sent == null || !sent.source().equals(current.source()) || !sent.pose().closeTo(current.pose())) {
+                broadcastPoses.put(entry.getKey(), current);
+                GNetworking.broadcastSourcePose(server, current.source(), current.pose());
+            }
+        }
+        for (Map.Entry<String, TrackedPose> entry : List.copyOf(broadcastPoses.entrySet())) {
+            TrackedPose current = sourcePoses.get(entry.getKey());
+            if (current == null || !current.source().equals(entry.getValue().source())) {
+                broadcastPoses.remove(entry.getKey());
+                GNetworking.broadcastSourcePose(server, entry.getValue().source(), null);
+            }
+        }
     }
 
     private String sourceChannelAt(ResourceKey<Level> dimension, BlockPos pos) {
@@ -489,6 +630,12 @@ public final class ChannelManagerPersistence extends SavedData {
     }
 
     private record ProjectionActivity(ProjectionSource source, int tick) {
+    }
+
+    public record TrackedPose(ProjectionSource.Key source, SourcePose pose) {
+    }
+
+    private record MovingTerminal(ResourceKey<Level> dimension, BlockPos pos, boolean pending, int tick) {
     }
 
     private record LegacyEntry(String name, @Nullable BlockPos pos) {

@@ -1,5 +1,6 @@
 package dev.imb11.client.gui;
 
+import dev.imb11.client.ClientSourcePoses;
 import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.platform.ClientNetworking;
 import dev.imb11.sync.Channel;
@@ -41,7 +42,7 @@ public final class ProjectorBlockScreen extends ChannelScreen<ProjectorBlockGUI>
         if (channel.source() == null) {
             return Component.literal("Not linked to a terminal");
         }
-        return Component.literal("Terminal at " + channel.source().pos().toShortString()
+        return Component.literal("Terminal at " + ClientSourcePoses.describe(channel.source())
                 + " (" + channel.source().dimension().location() + ")");
     }
 

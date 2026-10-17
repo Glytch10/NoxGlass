@@ -7,6 +7,7 @@ import dev.imb11.client.renderer.projection.ProjectionSurfaceRenderer;
 import dev.imb11.client.remote.RemoteSceneClientManager;
 import dev.imb11.platform.ClientNetworking;
 import dev.imb11.sync.packets.S2CChannelSnapshotPacket;
+import dev.imb11.sync.packets.S2CSourcePosePacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -22,6 +23,7 @@ public final class GlassClient {
 
     public static void initialize() {
         ClientNetworking.registerReceiver(S2CChannelSnapshotPacket.PACKET_ID, ClientProjectionSourceRegistry::applySnapshot);
+        ClientNetworking.registerReceiver(S2CSourcePosePacket.PACKET_ID, ClientSourcePoses::accept);
         RemoteSceneClientManager.registerReceivers();
     }
 
@@ -58,6 +60,7 @@ public final class GlassClient {
 
     public static void tick(Minecraft minecraft) {
         trackLevel(minecraft);
+        ClientSourcePoses.tick();
         RemoteSceneClientManager.tick(minecraft);
         ProjectionRenderManager.drainRetiredBufferPools();
     }
@@ -91,6 +94,7 @@ public final class GlassClient {
         }
         activeLevel = null;
         ClientProjectionSourceRegistry.clear();
+        ClientSourcePoses.clear();
         ProjectionRenderManager.reset();
         RemoteSceneClientManager.clearConnection();
         ProjectionSurfaceRenderer.reset();

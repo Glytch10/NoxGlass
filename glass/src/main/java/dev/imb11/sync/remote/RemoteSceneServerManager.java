@@ -1,6 +1,7 @@
 package dev.imb11.sync.remote;
 
 import dev.imb11.blocks.GBlocks;
+import dev.imb11.compat.SableCompatibility;
 import org.jetbrains.annotations.Nullable;
 import dev.imb11.debug.RemoteStreamTrace;
 import dev.imb11.projection.ProjectionChunkRegion;
@@ -8,6 +9,8 @@ import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.mixins.ChunkMapAccessor;
 import dev.imb11.mixins.TrackedEntityAccessor;
 import dev.imb11.sync.ChannelManagerPersistence;
+import dev.imb11.sync.ProjectionSource;
+import dev.imb11.sync.SourcePose;
 import dev.imb11.platform.PlatformNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -430,6 +433,7 @@ public final class RemoteSceneServerManager {
     }
 
     public static void tick(MinecraftServer server) {
+        ChannelManagerPersistence.get(server).tickSourcePoses();
         ServerState state = STATES.get(server);
         if (state == null) {
             return;
@@ -486,8 +490,13 @@ public final class RemoteSceneServerManager {
         if (projectorLevel == null || !projectorLevel.hasChunkAt(id.projectorPos())) {
             return Denial.PROJECTOR_UNLOADED;
         }
-        if (server.getLevel(id.source().dimension()) == null) {
+        ServerLevel sourceLevel = server.getLevel(id.source().dimension());
+        if (sourceLevel == null) {
             return Denial.SOURCE_LEVEL_MISSING;
+        }
+        ChunkPos sourceChunk = sourceChunk(server, sourceLevel, id.source());
+        if (sourceChunk == null) {
+            return Denial.SOURCE_POSE_UNKNOWN;
         }
         if (!authorizedViewer(player, projectorLevel, id)) {
             return Denial.VIEWER_NOT_AUTHORIZED;
@@ -498,10 +507,19 @@ public final class RemoteSceneServerManager {
         if (!PlatformNetworking.tracking(projectorLevel, id.projectorPos()).contains(player)) {
             return Denial.NOT_TRACKING;
         }
-        if (chunkDistance(new ChunkPos(id.source().pos()), center) > SOURCE_CAMERA_BUDGET) {
+        if (chunkDistance(sourceChunk, center) > SOURCE_CAMERA_BUDGET) {
             return Denial.SOURCE_TOO_FAR;
         }
         return null;
+    }
+
+    @Nullable
+    private static ChunkPos sourceChunk(MinecraftServer server, ServerLevel level, ProjectionSource source) {
+        if (!SableCompatibility.isOnSubLevel(level, source.pos())) {
+            return new ChunkPos(source.pos());
+        }
+        SourcePose pose = ChannelManagerPersistence.get(server).sourcePose(source);
+        return pose == null ? null : new ChunkPos(BlockPos.containing(pose.position()));
     }
 
     private static void logStreamProgress(MinecraftServer server, ServerState state) {
@@ -1102,6 +1120,7 @@ public final class RemoteSceneServerManager {
         UNSAFE_CENTER,
         PROJECTOR_UNLOADED,
         SOURCE_LEVEL_MISSING,
+        SOURCE_POSE_UNKNOWN,
         VIEWER_NOT_AUTHORIZED,
         STALE_SOURCE,
         NOT_TRACKING,

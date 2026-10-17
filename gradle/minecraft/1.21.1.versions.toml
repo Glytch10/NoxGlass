@@ -1,12 +1,22 @@
 [versions]
 java = "21"
 fabric-api = "0.103.0+1.21.1"
-fabric-loader = "0.16.3"
+fabric-loader = "0.18.4"
+fabric-loader-minimum = "0.16.3"
 neoforge = "21.1.249"
 iris-fabric = "1.8.14-beta.1+1.21.1-fabric"
 iris-neoforge = "1.8.14-beta.1+1.21.1-neoforge"
 sodium-fabric = "mc1.21.1-0.8.13-fabric"
 sodium-neoforge = "mc1.21.1-0.8.13-neoforge"
+sable-fabric = "OLG7vDD6"
+sable-neoforge = "fg9dTRz9"
+sable-companion = "1.6.0"
+create-neoforge = "6.0.10+mc1.21.1"
+create-aeronautics-neoforge = "1.3.2+mc1.21.1"
+create-connected-neoforge = "Xe7EqzfQ"
+create-bits-n-bobs-neoforge = "g9Lmjjc5"
+azimuth-api-neoforge = "dxtZVosY"
+strut-your-stuff-neoforge = "BOTN7zzN"
 
 [libraries]
 fabric-api = { module = "net.fabricmc.fabric-api:fabric-api", version.ref = "fabric-api" }
@@ -16,3 +26,12 @@ iris-fabric = { module = "maven.modrinth:iris", version.ref = "iris-fabric" }
 iris-neoforge = { module = "maven.modrinth:iris", version.ref = "iris-neoforge" }
 sodium-fabric = { module = "maven.modrinth:sodium", version.ref = "sodium-fabric" }
 sodium-neoforge = { module = "maven.modrinth:sodium", version.ref = "sodium-neoforge" }
+sable-fabric = { module = "maven.modrinth:sable", version.ref = "sable-fabric" }
+sable-neoforge = { module = "maven.modrinth:sable", version.ref = "sable-neoforge" }
+sable-companion = { module = "dev.ryanhcode.sable-companion:sable-companion-common-1.21.1", version.ref = "sable-companion" }
+create-neoforge = { module = "maven.modrinth:create", version.ref = "create-neoforge" }
+create-aeronautics-neoforge = { module = "maven.modrinth:create-aeronautics", version.ref = "create-aeronautics-neoforge" }
+create-connected-neoforge = { module = "maven.modrinth:create-connected", version.ref = "create-connected-neoforge" }
+create-bits-n-bobs-neoforge = { module = "maven.modrinth:create-bits-n-bobs", version.ref = "create-bits-n-bobs-neoforge" }
+azimuth-api-neoforge = { module = "maven.modrinth:azimuth-api", version.ref = "azimuth-api-neoforge" }
+strut-your-stuff-neoforge = { module = "maven.modrinth:strut-your-stuff", version.ref = "strut-your-stuff-neoforge" }

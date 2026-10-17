@@ -1,5 +1,6 @@
 package dev.imb11.client.gui;
 
+import dev.imb11.client.ClientSourcePoses;
 import dev.imb11.platform.ClientNetworking;
 import dev.imb11.sync.Channel;
 import dev.imb11.sync.packets.C2SRemoveLinkedChannelPacket;
@@ -47,7 +48,7 @@ public final class TerminalBlockScreen extends ChannelScreen<TerminalBlockGUI> {
         if (channel.source() == null) {
             return Component.literal("Available");
         }
-        return Component.literal("Used by terminal at " + channel.source().pos().toShortString()
+        return Component.literal("Used by terminal at " + ClientSourcePoses.describe(channel.source())
                 + " (" + channel.source().dimension().location() + ")");
     }
 

@@ -4,6 +4,7 @@ import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import dev.imb11.client.compat.SableRenderCompatibility;
 import dev.imb11.mixins.LevelRendererBufferAccessor;
 import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
@@ -135,6 +136,11 @@ public class ProjectionLevelRenderer extends LevelRenderer {
                 buffer.bind();
                 buffer.draw();
             }
+            if (offset != null) {
+                offset.set(0.0F, 0.0F, 0.0F);
+            }
+            SableRenderCompatibility.renderSectionLayer(projectionLevel, layer, shader, camera, modelView, projection,
+                    minecraft.getTimer().getGameTimeDeltaPartialTick(false));
         } finally {
             if (offset != null) {
                 offset.set(0.0F, 0.0F, 0.0F);

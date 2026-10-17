@@ -32,9 +32,12 @@ import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Objects;
 
 public class ProjectorBlockEntity extends PlatformBlockEntity implements ExtendedMenuProvider<BlockPos> {
+    private static final int MAX_PANEL_SOUNDS_PER_STEP = 2;
     public static BlockEntityType<ProjectorBlockEntity> BLOCK_ENTITY_TYPE = BlockEntityType.Builder.of(ProjectorBlockEntity::new, GBlocks.PROJECTOR).build(null);
     public boolean active = false;
     private String channel = "";
@@ -176,10 +179,15 @@ public class ProjectorBlockEntity extends PlatformBlockEntity implements Extende
     }
 
     private void playPanelTransitionSounds(Level world, SoundEvent sound, int distance) {
+        List<ProjectionSurface.Face> ring = new ArrayList<>();
         for (ProjectionSurface.Face face : projectionSurface.faces()) {
-            if (face.revealDistance() != distance) {
-                continue;
+            if (face.revealDistance() == distance) {
+                ring.add(face);
             }
+        }
+        int sounds = Math.min(ring.size(), MAX_PANEL_SOUNDS_PER_STEP);
+        for (int index = 0; index < sounds; index++) {
+            ProjectionSurface.Face face = ring.get(index * ring.size() / sounds);
             BlockPos position = face.position();
             Direction normal = face.normal();
             world.playLocalSound(

@@ -1,5 +1,6 @@
 package dev.imb11.client.gui;
 
+import dev.imb11.client.ClientSourcePoses;
 import dev.imb11.client.ClientProjectionSourceRegistry;
 import com.mojang.blaze3d.systems.RenderSystem;
 import dev.imb11.client.renderer.projection.ProjectionRenderManager;
@@ -255,7 +256,7 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     private Component detailStatus(Channel selected) {
         if (confirmingDelete) {
             return Component.literal("Delete " + selected.name() + "? This cannot be undone."
-                    + (selected.source() == null ? "" : " Unlinks terminal at " + selected.source().pos().toShortString()
+                    + (selected.source() == null ? "" : " Unlinks terminal at " + ClientSourcePoses.describe(selected.source())
                     + " (" + selected.source().dimension().location() + ")."));
         }
         return status(selected);

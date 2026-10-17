@@ -11,6 +11,7 @@ import dev.imb11.sync.packets.C2SProjectorChannelChangedPacket;
 import dev.imb11.sync.packets.C2SRemoveLinkedChannelPacket;
 import dev.imb11.sync.packets.C2STerminalChannelChangedPacket;
 import dev.imb11.sync.packets.S2CChannelSnapshotPacket;
+import dev.imb11.sync.packets.S2CSourcePosePacket;
 import dev.imb11.sync.remote.C2SRemoteSubscribePacket;
 import dev.imb11.sync.remote.C2SRemoteChunkAckPacket;
 import dev.imb11.sync.remote.C2SRemoteUnsubscribePacket;
@@ -29,6 +30,7 @@ import dev.imb11.platform.PlatformNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import org.jetbrains.annotations.Nullable;
 
 public final class GNetworking {
     private static final double MAX_INTERACTION_DISTANCE_SQUARED = 64.0D;
@@ -53,11 +55,27 @@ public final class GNetworking {
         PlatformNetworking.registerClientbound(S2CRemoteBlockUpdatesPacket.PACKET_ID, S2CRemoteBlockUpdatesPacket.PACKET_CODEC);
         PlatformNetworking.registerClientbound(S2CRemoteLightPacket.PACKET_ID, S2CRemoteLightPacket.PACKET_CODEC);
         PlatformNetworking.registerClientbound(S2CRemoteWorldStatePacket.PACKET_ID, S2CRemoteWorldStatePacket.PACKET_CODEC);
+        PlatformNetworking.registerClientbound(S2CSourcePosePacket.PACKET_ID, S2CSourcePosePacket.PACKET_CODEC);
     }
 
     public static void sendSnapshot(ServerPlayer player) {
+        ChannelManagerPersistence persistence = ChannelManagerPersistence.get(player.serverLevel().getServer());
         if (PlatformNetworking.canSend(player, S2CChannelSnapshotPacket.PACKET_ID)) {
-            PlatformNetworking.send(player, ChannelManagerPersistence.get(player.serverLevel().getServer()).snapshotPacket());
+            PlatformNetworking.send(player, persistence.snapshotPacket());
+        }
+        if (PlatformNetworking.canSend(player, S2CSourcePosePacket.PACKET_ID)) {
+            for (ChannelManagerPersistence.TrackedPose tracked : persistence.sourcePoses()) {
+                PlatformNetworking.send(player, new S2CSourcePosePacket(tracked.source(), tracked.pose()));
+            }
+        }
+    }
+
+    public static void broadcastSourcePose(MinecraftServer server, ProjectionSource.Key source, @Nullable SourcePose pose) {
+        S2CSourcePosePacket packet = new S2CSourcePosePacket(source, pose);
+        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+            if (PlatformNetworking.canSend(player, S2CSourcePosePacket.PACKET_ID)) {
+                PlatformNetworking.send(player, packet);
+            }
         }
     }
 
