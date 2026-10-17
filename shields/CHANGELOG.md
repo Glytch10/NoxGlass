@@ -1,11 +1,5 @@
 # Changelog
 
-## [Unreleased]
-
-### Added
-
-- Added support for 26.2 NeoForge and 26.3 NeoForge ([#336](https://github.com/IMB11-Mods/JavaEditionMods/pull/336))
-
 ## [1.4.2] - 2026-06-03
 
 - Rendering fixes.
