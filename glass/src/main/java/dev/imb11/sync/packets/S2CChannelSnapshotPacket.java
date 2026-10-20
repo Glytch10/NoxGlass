@@ -9,14 +9,14 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public record S2CChannelSnapshotPacket(long registryRevision, List<Channel> channels) implements CustomPacketPayload {
-    public static final CustomPacketPayload.Type<S2CChannelSnapshotPacket> PACKET_ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("glass", "channel_snapshot"));
+    public static final CustomPacketPayload.Type<S2CChannelSnapshotPacket> PACKET_ID = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("glass", "channel_snapshot"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CChannelSnapshotPacket> PACKET_CODEC = StreamCodec.ofMember(S2CChannelSnapshotPacket::write, S2CChannelSnapshotPacket::read);
 
     public S2CChannelSnapshotPacket {
@@ -42,7 +42,7 @@ public record S2CChannelSnapshotPacket(long registryRevision, List<Channel> chan
             ProjectionSource source = channel.source();
             buf.writeBoolean(source != null);
             if (source != null) {
-                buf.writeIdentifier(source.dimension().identifier());
+                buf.writeResourceLocation(source.dimension().location());
                 buf.writeBlockPos(source.pos());
                 buf.writeEnum(source.facing());
                 buf.writeVarLong(source.revision());
@@ -61,7 +61,7 @@ public record S2CChannelSnapshotPacket(long registryRevision, List<Channel> chan
             String name = buf.readUtf(ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
             ProjectionSource source = null;
             if (buf.readBoolean()) {
-                ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, buf.readIdentifier());
+                ResourceKey<Level> dimension = ResourceKey.create(Registries.DIMENSION, buf.readResourceLocation());
                 source = new ProjectionSource(name, dimension, buf.readBlockPos(), buf.readEnum(Direction.class), buf.readVarLong());
             }
             channels.add(new Channel(name, source));

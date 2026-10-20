@@ -1,6 +1,7 @@
 package dev.imb11.sync.remote;
 
 import dev.imb11.blocks.GBlocks;
+import dev.imb11.compat.SableCompatibility;
 import org.jetbrains.annotations.Nullable;
 import dev.imb11.debug.RemoteStreamTrace;
 import dev.imb11.projection.ProjectionChunkRegion;
@@ -8,6 +9,8 @@ import dev.imb11.blocks.entity.ProjectorBlockEntity;
 import dev.imb11.mixins.ChunkMapAccessor;
 import dev.imb11.mixins.TrackedEntityAccessor;
 import dev.imb11.sync.ChannelManagerPersistence;
+import dev.imb11.sync.ProjectionSource;
+import dev.imb11.sync.SourcePose;
 import dev.imb11.platform.PlatformNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -17,6 +20,7 @@ import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
 import net.minecraft.network.protocol.game.ClientboundBundlePacket;
 import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
 import net.minecraft.network.protocol.game.ClientboundMoveEntityPacket;
+import net.minecraft.network.protocol.game.ClientboundTeleportEntityPacket;
 import net.minecraft.network.protocol.game.ClientboundLightUpdatePacket;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
 import it.unimi.dsi.fastutil.shorts.ShortOpenHashSet;
@@ -26,6 +30,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.TicketType;
 import net.minecraft.world.level.ChunkPos;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.chunk.ChunkAccess;
@@ -78,15 +83,13 @@ public final class RemoteSceneServerManager {
     private static final int MAX_REMOTE_ENTITIES = 128;
     private static final int MAX_ENTITY_SPAWNS_PER_TICK = 8;
     private static final Map<MinecraftServer, ServerState> STATES = new IdentityHashMap<>();
-    public static final TicketType REMOTE_TICKET = new TicketType(TICKET_TIMEOUT_TICKS, TicketType.FLAG_LOADING | TicketType.FLAG_SIMULATION);
-
-    public static void registerTicketType() {
-        net.minecraft.core.Registry.register(net.minecraft.core.registries.BuiltInRegistries.TICKET_TYPE,
-                net.minecraft.resources.Identifier.fromNamespaceAndPath("glass", "remote_scene"), REMOTE_TICKET);
-    }
+    private static final Comparator<TicketKey> TICKET_COMPARATOR = Comparator
+            .comparing((TicketKey key) -> key.dimension().location().toString())
+            .thenComparingLong(TicketKey::chunk);
+    private static final TicketType<TicketKey> REMOTE_TICKET = TicketType.create("glass_remote_scene", TICKET_COMPARATOR, TICKET_TIMEOUT_TICKS);
 
     public static void subscribe(ServerPlayer player, C2SRemoteSubscribePacket packet) {
-        MinecraftServer server = player.level().getServer();
+        MinecraftServer server = player.getServer();
         if (server == null) {
             return;
         }
@@ -141,7 +144,7 @@ public final class RemoteSceneServerManager {
     }
 
     public static void update(ServerPlayer player, C2SRemoteUpdatePacket packet) {
-        MinecraftServer server = player.level().getServer();
+        MinecraftServer server = player.getServer();
         if (server == null) {
             return;
         }
@@ -174,7 +177,7 @@ public final class RemoteSceneServerManager {
     }
 
     public static void acknowledge(ServerPlayer player, C2SRemoteChunkAckPacket packet) {
-        ServerState state = STATES.get(player.level().getServer());
+        ServerState state = STATES.get(player.getServer());
         PlayerState subscriptions = state == null ? null : state.players.get(player.getUUID());
         Subscription subscription = subscriptions == null ? null : subscriptions.subscriptions.get(packet.subscription());
         InFlight flight = subscription == null ? null : subscription.inFlight.get(packet.chunk());
@@ -185,7 +188,7 @@ public final class RemoteSceneServerManager {
     }
 
     public static void unsubscribe(ServerPlayer player, C2SRemoteUnsubscribePacket packet) {
-        MinecraftServer server = player.level().getServer();
+        MinecraftServer server = player.getServer();
         if (server == null) {
             return;
         }
@@ -216,7 +219,7 @@ public final class RemoteSceneServerManager {
         if (state == null) {
             return;
         }
-        ChunkPos chunk = ChunkPos.containing(pos);
+        ChunkPos chunk = new ChunkPos(pos);
         state.preparedChunks.invalidate(level.dimension(), chunk);
         SectionPos section = SectionPos.of(pos);
         short packed = SectionPos.sectionRelativePos(pos);
@@ -259,7 +262,7 @@ public final class RemoteSceneServerManager {
             return;
         }
         if (packet instanceof ClientboundMoveEntityPacket) {
-            packet = net.minecraft.network.protocol.game.ClientboundEntityPositionSyncPacket.of(entity);
+            packet = new ClientboundTeleportEntityPacket(entity);
         }
         if (!S2CRemoteEntitiesPacket.supports(packet)) {
             return;
@@ -337,8 +340,8 @@ public final class RemoteSceneServerManager {
                 if (subscription.entities.size() < MAX_REMOTE_ENTITIES) {
                     int radius = subscription.grantedRadius;
                     ChunkPos center = subscription.grantedCenter;
-                    AABB bounds = new AABB((center.x() - radius) * 16.0, level.getMinY(), (center.z() - radius) * 16.0,
-                            (center.x() + radius + 1) * 16.0, level.getMaxY() + 1.0, (center.z() + radius + 1) * 16.0);
+                    AABB bounds = new AABB((center.x - radius) * 16.0, level.getMinBuildHeight(), (center.z - radius) * 16.0,
+                            (center.x + radius + 1) * 16.0, level.getMaxBuildHeight(), (center.z + radius + 1) * 16.0);
                     int spawned = 0;
                     var tracked = ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$getEntityMap();
                     for (Entity entity : level.getEntities((Entity) null, bounds, entity -> !entity.isRemoved())) {
@@ -430,6 +433,7 @@ public final class RemoteSceneServerManager {
     }
 
     public static void tick(MinecraftServer server) {
+        ChannelManagerPersistence.get(server).tickSourcePoses();
         ServerState state = STATES.get(server);
         if (state == null) {
             return;
@@ -477,7 +481,7 @@ public final class RemoteSceneServerManager {
     @Nullable
     private static Denial denial(MinecraftServer server, @Nullable ServerPlayer player, RemoteSubscriptionId id, ChunkPos center) {
         ServerLevel projectorLevel = server.getLevel(id.projectorDimension());
-        if (player == null || !player.level().dimension().equals(id.projectorDimension())) {
+        if (player == null || !player.serverLevel().dimension().equals(id.projectorDimension())) {
             return Denial.PLAYER_DIMENSION;
         }
         if (!safeCenter(center)) {
@@ -486,8 +490,13 @@ public final class RemoteSceneServerManager {
         if (projectorLevel == null || !projectorLevel.hasChunkAt(id.projectorPos())) {
             return Denial.PROJECTOR_UNLOADED;
         }
-        if (server.getLevel(id.source().dimension()) == null) {
+        ServerLevel sourceLevel = server.getLevel(id.source().dimension());
+        if (sourceLevel == null) {
             return Denial.SOURCE_LEVEL_MISSING;
+        }
+        ChunkPos sourceChunk = sourceChunk(server, sourceLevel, id.source());
+        if (sourceChunk == null) {
+            return Denial.SOURCE_POSE_UNKNOWN;
         }
         if (!authorizedViewer(player, projectorLevel, id)) {
             return Denial.VIEWER_NOT_AUTHORIZED;
@@ -498,10 +507,19 @@ public final class RemoteSceneServerManager {
         if (!PlatformNetworking.tracking(projectorLevel, id.projectorPos()).contains(player)) {
             return Denial.NOT_TRACKING;
         }
-        if (chunkDistance(ChunkPos.containing(id.source().pos()), center) > SOURCE_CAMERA_BUDGET) {
+        if (chunkDistance(sourceChunk, center) > SOURCE_CAMERA_BUDGET) {
             return Denial.SOURCE_TOO_FAR;
         }
         return null;
+    }
+
+    @Nullable
+    private static ChunkPos sourceChunk(MinecraftServer server, ServerLevel level, ProjectionSource source) {
+        if (!SableCompatibility.isOnSubLevel(level, source.pos())) {
+            return new ChunkPos(source.pos());
+        }
+        SourcePose pose = ChannelManagerPersistence.get(server).sourcePose(source);
+        return pose == null ? null : new ChunkPos(BlockPos.containing(pose.position()));
     }
 
     private static void logStreamProgress(MinecraftServer server, ServerState state) {
@@ -563,14 +581,14 @@ public final class RemoteSceneServerManager {
     private static Set<TicketKey> regionKeys(Subscription subscription, int radius) {
         Set<TicketKey> keys = new HashSet<>();
         for (ChunkPos chunk : new ProjectionChunkRegion(subscription.requestedCenter, radius).withNeighbors().chunks()) {
-            keys.add(new TicketKey(subscription.id.source().dimension(), chunk.pack()));
+            keys.add(new TicketKey(subscription.id.source().dimension(), chunk.toLong()));
         }
         return keys;
     }
 
     private static boolean vanillaTracks(ServerPlayer player, ServerLevel level, ChunkPos chunk) {
-        return player != null && player.level() == level
-                && ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$isChunkTracked(player, chunk.x(), chunk.z());
+        return player != null && player.serverLevel() == level
+                && ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$isChunkTracked(player, chunk.x, chunk.z);
     }
 
     private static boolean reuseChunk(MinecraftServer server, ServerState state, Subscription subscription, ServerLevel level, ChunkPos chunk) {
@@ -606,8 +624,8 @@ public final class RemoteSceneServerManager {
 
     private static void retainTicket(ServerState state, ServerLevel level, TicketKey key) {
         if (state.ticketReferences.merge(key, 1, Integer::sum) == 1) {
-            level.getChunkSource().addTicketWithRadius(REMOTE_TICKET,
-                    ChunkPos.unpack(key.chunk()), 33 - SEND_READY_TICKET_LEVEL);
+            level.getChunkSource().chunkMap.getDistanceManager().addTicket(REMOTE_TICKET,
+                    new ChunkPos(key.chunk()), SEND_READY_TICKET_LEVEL, key);
         }
     }
 
@@ -615,8 +633,8 @@ public final class RemoteSceneServerManager {
         int remaining = state.ticketReferences.getOrDefault(key, 1) - 1;
         if (remaining <= 0) {
             state.ticketReferences.remove(key);
-            level.getChunkSource().removeTicketWithRadius(REMOTE_TICKET,
-                    ChunkPos.unpack(key.chunk()), 33 - SEND_READY_TICKET_LEVEL);
+            level.getChunkSource().chunkMap.getDistanceManager().removeTicket(REMOTE_TICKET,
+                    new ChunkPos(key.chunk()), SEND_READY_TICKET_LEVEL, key);
         } else {
             state.ticketReferences.put(key, remaining);
         }
@@ -635,7 +653,7 @@ public final class RemoteSceneServerManager {
         Set<ChunkPos> added = new HashSet<>(next);
         added.removeAll(subscription.interest);
         for (ChunkPos chunk : added) {
-            TicketKey key = new TicketKey(level.dimension(), chunk.pack());
+            TicketKey key = new TicketKey(level.dimension(), chunk.toLong());
             retainTicket(state, level, key);
             subscription.tickets.put(chunk, key);
         }
@@ -650,10 +668,10 @@ public final class RemoteSceneServerManager {
             subscription.refreshChunks.remove(chunk);
             subscription.resyncChunks.remove(chunk);
             subscription.lightChanges.remove(chunk);
-            subscription.blockEntities.removeIf(pos -> ChunkPos.containing(pos).equals(chunk));
+            subscription.blockEntities.removeIf(pos -> new ChunkPos(pos).equals(chunk));
             subscription.blockChanges.keySet().removeIf(section -> section.chunk().equals(chunk));
             if (subscription.sentChunks.remove(chunk)) {
-                sendToSubscription(server, subscription, new S2CRemoteUnloadPacket(subscription.id, subscription.nextSequence(), chunk.x(), chunk.z()));
+                sendToSubscription(server, subscription, new S2CRemoteUnloadPacket(subscription.id, subscription.nextSequence(), chunk.x, chunk.z));
             }
         }
         subscription.interest.clear();
@@ -692,7 +710,6 @@ public final class RemoteSceneServerManager {
                 level.isDebug(),
                 level.isFlat(),
                 BiomeManager.obfuscateSeed(level.getSeed()),
-                level.getSeaLevel(),
                 worldState(level)
         ));
     }
@@ -701,8 +718,8 @@ public final class RemoteSceneServerManager {
         for (TicketKey key : state.ticketReferences.keySet()) {
             ServerLevel level = server.getLevel(key.dimension());
             if (level != null) {
-                level.getChunkSource().addTicketWithRadius(REMOTE_TICKET,
-                        ChunkPos.unpack(key.chunk()), 33 - SEND_READY_TICKET_LEVEL);
+                level.getChunkSource().chunkMap.getDistanceManager().addTicket(REMOTE_TICKET,
+                        new ChunkPos(key.chunk()), SEND_READY_TICKET_LEVEL, key);
             }
         }
     }
@@ -738,12 +755,12 @@ public final class RemoteSceneServerManager {
                 while (positions.hasNext() && updates.size() < S2CRemoteBlockEntitiesPacket.MAX_UPDATES) {
                     BlockPos pos = positions.next();
                     if (subscription.blockChanges.containsKey(SectionPos.of(pos))
-                            || subscription.pendingChunks.contains(ChunkPos.containing(pos))) {
+                            || subscription.pendingChunks.contains(new ChunkPos(pos))) {
                         continue;
                     }
                     positions.remove();
-                    if (subscription.sentChunks.contains(ChunkPos.containing(pos))
-                            && !vanillaTracks(server.getPlayerList().getPlayer(subscription.player), level, ChunkPos.containing(pos))) {
+                    if (subscription.sentChunks.contains(new ChunkPos(pos))
+                            && !vanillaTracks(server.getPlayerList().getPlayer(subscription.player), level, new ChunkPos(pos))) {
                         var blockEntity = level.getBlockEntity(pos);
                         if (blockEntity != null) {
                             updates.add(ClientboundBlockEntityDataPacket.create(blockEntity));
@@ -765,7 +782,7 @@ public final class RemoteSceneServerManager {
                     continue;
                 }
                 LevelChunk chunk = level.getChunkSource().getChunkNow(section.x(), section.z());
-                if (chunk == null || section.y() < level.getMinSectionY() || section.y() > level.getMaxSectionY()) {
+                if (chunk == null || section.y() < level.getMinSection() || section.y() >= level.getMaxSection()) {
                     blockIterator.remove();
                     continue;
                 }
@@ -892,7 +909,7 @@ public final class RemoteSceneServerManager {
                 deferred.add(pos);
                 continue;
             }
-            LevelChunk chunk = ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$getChunkToSend(pos.pack());
+            LevelChunk chunk = ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$getChunkToSend(pos.toLong());
             if (chunk != null && chunk.isLightCorrect()) {
                 result = chunk;
                 break;
@@ -928,7 +945,7 @@ public final class RemoteSceneServerManager {
                     subscription.pendingChunks.remove(pos);
                     continue;
                 }
-                LevelChunk chunk = ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$getChunkToSend(pos.pack());
+                LevelChunk chunk = ((ChunkMapAccessor) level.getChunkSource().chunkMap).glass$getChunkToSend(pos.toLong());
                 if (chunk == null || !chunk.isLightCorrect() || state.preparedChunks.find(level, chunk) != null) {
                     continue;
                 }
@@ -960,7 +977,9 @@ public final class RemoteSceneServerManager {
 
     private static RemoteWorldState worldState(ServerLevel level) {
         return new RemoteWorldState(
-                level.getServer().clockManager().createFullSyncPacket(),
+                level.getGameTime(),
+                level.getDayTime(),
+                level.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT),
                 level.getRainLevel(1.0F),
                 level.getThunderLevel(1.0F),
                 0
@@ -1072,26 +1091,26 @@ public final class RemoteSceneServerManager {
     }
 
     private static int chunkDistance(ChunkPos first, ChunkPos second) {
-        long x = Math.abs((long) first.x() - second.x());
-        long z = Math.abs((long) first.z() - second.z());
+        long x = Math.abs((long) first.x - second.x);
+        long z = Math.abs((long) first.z - second.z);
         return (int) Math.min(Integer.MAX_VALUE, Math.max(x, z));
     }
 
     private static boolean safeCenter(ChunkPos center) {
         int margin = MAX_RADIUS + 1;
-        return Math.abs((long) center.x()) <= MAX_CHUNK_COORDINATE - margin
-                && Math.abs((long) center.z()) <= MAX_CHUNK_COORDINATE - margin;
+        return Math.abs((long) center.x) <= MAX_CHUNK_COORDINATE - margin
+                && Math.abs((long) center.z) <= MAX_CHUNK_COORDINATE - margin;
     }
 
     private static Comparator<ChunkPos> chunkComparator(ChunkPos center) {
         return Comparator.comparingInt((ChunkPos chunk) -> chunkDistance(center, chunk))
-                .thenComparingInt(chunk -> chunk.x())
-                .thenComparingInt(chunk -> chunk.z());
+                .thenComparingInt(chunk -> chunk.x)
+                .thenComparingInt(chunk -> chunk.z);
     }
 
     private static final Comparator<Subscription> SUBSCRIPTION_COMPARATOR = Comparator
             .comparing((Subscription subscription) -> subscription.player)
-            .thenComparing(subscription -> subscription.id.projectorDimension().identifier().toString())
+            .thenComparing(subscription -> subscription.id.projectorDimension().location().toString())
             .thenComparingLong(subscription -> subscription.id.projectorPos().asLong())
             .thenComparing(subscription -> subscription.id.source().channel())
             .thenComparingLong(subscription -> subscription.id.epoch());
@@ -1101,6 +1120,7 @@ public final class RemoteSceneServerManager {
         UNSAFE_CENTER,
         PROJECTOR_UNLOADED,
         SOURCE_LEVEL_MISSING,
+        SOURCE_POSE_UNKNOWN,
         VIEWER_NOT_AUTHORIZED,
         STALE_SOURCE,
         NOT_TRACKING,

@@ -4,13 +4,13 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.game.ClientboundSectionBlocksUpdatePacket;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 public record S2CRemoteBlockUpdatesPacket(RemoteSubscriptionId subscription, long sequence,
                                          int sectionX, int sectionY, int sectionZ,
                                          ClientboundSectionBlocksUpdatePacket updates) implements CustomPacketPayload {
     public static final int MAX_UPDATES = 64;
-    public static final Type<S2CRemoteBlockUpdatesPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_block_updates"));
+    public static final Type<S2CRemoteBlockUpdatesPacket> PACKET_ID = new Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remote_block_updates"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteBlockUpdatesPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteBlockUpdatesPacket::write, S2CRemoteBlockUpdatesPacket::read);
 
     @Override

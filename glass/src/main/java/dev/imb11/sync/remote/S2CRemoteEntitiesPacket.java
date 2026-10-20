@@ -6,7 +6,7 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.protocol.game.*;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 import java.util.List;
 import org.slf4j.Logger;
@@ -14,11 +14,11 @@ import org.slf4j.Logger;
 public record S2CRemoteEntitiesPacket(RemoteSubscriptionId subscription, long sequence, List<EntityMessage> messages) implements CustomPacketPayload {
     private static final Logger LOGGER = LogUtils.getLogger();
     public static final int MAX_MESSAGES = 128;
-    public static final Type<S2CRemoteEntitiesPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_entities"));
+    public static final Type<S2CRemoteEntitiesPacket> PACKET_ID = new Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remote_entities"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteEntitiesPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteEntitiesPacket::write, S2CRemoteEntitiesPacket::read);
     private static final List<Entry<?>> ENTRIES = List.of(
             new Entry<>(ClientboundAddEntityPacket.class, ClientboundAddEntityPacket.STREAM_CODEC),
-            new Entry<>(ClientboundEntityPositionSyncPacket.class, ClientboundEntityPositionSyncPacket.STREAM_CODEC),
+            new Entry<>(ClientboundAddExperienceOrbPacket.class, ClientboundAddExperienceOrbPacket.STREAM_CODEC),
             new Entry<>(ClientboundSetEntityDataPacket.class, ClientboundSetEntityDataPacket.STREAM_CODEC),
             new Entry<>(ClientboundMoveEntityPacket.Pos.class, ClientboundMoveEntityPacket.Pos.STREAM_CODEC),
             new Entry<>(ClientboundMoveEntityPacket.Rot.class, ClientboundMoveEntityPacket.Rot.STREAM_CODEC),

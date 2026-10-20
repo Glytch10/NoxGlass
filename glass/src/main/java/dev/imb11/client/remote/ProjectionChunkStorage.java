@@ -3,18 +3,17 @@ package dev.imb11.client.remote;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.SectionPos;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkPacketData;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
-import java.util.function.LongConsumer;
 
 public final class ProjectionChunkStorage {
     private final ClientChunkCache cache;
@@ -29,76 +28,49 @@ public final class ProjectionChunkStorage {
     }
 
     public LevelChunk get(int x, int z) {
-        Entry entry = chunks.get(ChunkPos.pack(x, z));
+        Entry entry = chunks.get(ChunkPos.asLong(x, z));
         return entry == null ? null : entry.chunk;
     }
 
     public boolean contains(int x, int z) {
-        return chunks.containsKey(ChunkPos.pack(x, z));
+        return chunks.containsKey(ChunkPos.asLong(x, z));
     }
 
     public boolean retained(ChunkPos pos) {
-        Entry entry = chunks.get(pos.pack());
+        Entry entry = chunks.get(pos.toLong());
         return entry != null && entry.references > 0;
     }
 
-    public void forEachReadyChunk(ChunkPos center, int radius, LongConsumer consumer) {
-        for (Map.Entry<Long, Entry> entry : chunks.entrySet()) {
-            if (entry.getValue().references <= 0 || entry.getValue().chunk == null) {
-                continue;
-            }
-            int chunkX = ChunkPos.getX(entry.getKey());
-            int chunkZ = ChunkPos.getZ(entry.getKey());
-            if (Math.abs(chunkX - center.x()) > radius || Math.abs(chunkZ - center.z()) > radius) {
-                continue;
-            }
-            boolean ready = true;
-            for (int x = chunkX - 1; x <= chunkX + 1 && ready; x++) {
-                for (int z = chunkZ - 1; z <= chunkZ + 1; z++) {
-                    if (cache.getChunk(x, z, ChunkStatus.FULL, false) == null
-                            || !cache.getLightEngine().lightOnInColumn(SectionPos.asLong(x, 0, z))) {
-                        ready = false;
-                        break;
-                    }
-                }
-            }
-            if (ready) {
-                consumer.accept(entry.getKey());
-            }
-        }
-    }
-
     public boolean vanilla(ChunkPos pos) {
-        Entry entry = chunks.get(pos.pack());
+        Entry entry = chunks.get(pos.toLong());
         return entry != null && entry.vanilla;
     }
 
     public void retain(ChunkPos pos) {
-        Entry entry = chunks.get(pos.pack());
+        Entry entry = chunks.get(pos.toLong());
         if (entry == null) {
-            LevelChunk existing = cache.getChunk(pos.x(), pos.z(), ChunkStatus.FULL, false);
+            LevelChunk existing = cache.getChunk(pos.x, pos.z, ChunkStatus.FULL, false);
             entry = new Entry(existing, existing != null);
-            chunks.put(pos.pack(), entry);
+            chunks.put(pos.toLong(), entry);
         }
         entry.references++;
     }
 
     public void release(ClientLevel level, ChunkPos pos) {
-        Entry entry = chunks.get(pos.pack());
+        Entry entry = chunks.get(pos.toLong());
         if (entry == null || entry.references < 1 || --entry.references > 0 || entry.vanilla) {
             return;
         }
-        chunks.remove(pos.pack());
+        chunks.remove(pos.toLong());
         if (entry.chunk != null) {
             level.unload(entry.chunk);
             clearLight(level, pos);
-            markUnloaded(entry.chunk);
         }
     }
 
-    public LevelChunk replace(ClientLevel level, int x, int z, FriendlyByteBuf data, java.util.Map<net.minecraft.world.level.levelgen.Heightmap.Types, long[]> heightmaps,
+    public LevelChunk replace(ClientLevel level, int x, int z, FriendlyByteBuf data, CompoundTag heightmaps,
                               Consumer<ClientboundLevelChunkPacketData.BlockEntityTagOutput> blockEntities, boolean vanilla) {
-        Entry entry = chunks.get(ChunkPos.pack(x, z));
+        Entry entry = chunks.get(ChunkPos.asLong(x, z));
         if (entry == null) {
             throw new IllegalStateException("Chunk has no projection owner");
         }
@@ -110,67 +82,36 @@ public final class ProjectionChunkStorage {
         }
         entry.vanilla |= vanilla;
         entry.chunk.replaceWithPacketData(data, heightmaps, blockEntities);
-        markLoaded(entry.chunk);
         level.onChunkLoaded(new ChunkPos(x, z));
         return entry.chunk;
     }
 
     public boolean dropVanilla(ClientLevel level, ChunkPos pos) {
-        Entry entry = chunks.get(pos.pack());
+        Entry entry = chunks.get(pos.toLong());
         if (entry == null) {
             return false;
         }
         entry.vanilla = false;
         if (entry.references == 0) {
-            chunks.remove(pos.pack());
+            chunks.remove(pos.toLong());
             if (entry.chunk != null) {
                 level.unload(entry.chunk);
-                markUnloaded(entry.chunk);
             }
         }
         return true;
     }
 
     public boolean protectFromUnload(LevelChunk chunk) {
-        Entry entry = chunks.get(chunk.getPos().pack());
+        Entry entry = chunks.get(chunk.getPos().toLong());
         if (entry == null || entry.chunk != chunk) {
             return false;
         }
         if (entry.references > 0) {
             entry.vanilla = false;
-            markLoaded(chunk);
             return true;
         }
-        chunks.remove(chunk.getPos().pack());
+        chunks.remove(chunk.getPos().toLong());
         return false;
-    }
-
-    private void markLoaded(LevelChunk chunk) {
-        long chunkNode = chunk.getPos().pack();
-        cache.removedLoadedChunks().remove(chunkNode);
-        cache.addedLoadedChunks().add(chunkNode);
-        LevelChunkSection[] sections = chunk.getSections();
-        for (int index = 0; index < sections.length; index++) {
-            long sectionNode = SectionPos.asLong(chunk.getPos().x(), chunk.getSectionYFromSectionIndex(index), chunk.getPos().z());
-            if (sections[index].hasOnlyAir()) {
-                cache.removedEmptySections().remove(sectionNode);
-                cache.addedEmptySections().add(sectionNode);
-            } else {
-                cache.addedEmptySections().remove(sectionNode);
-                cache.removedEmptySections().add(sectionNode);
-            }
-        }
-    }
-
-    private void markUnloaded(LevelChunk chunk) {
-        long chunkNode = chunk.getPos().pack();
-        cache.addedLoadedChunks().remove(chunkNode);
-        cache.removedLoadedChunks().add(chunkNode);
-        for (int index = 0; index < chunk.getSections().length; index++) {
-            long sectionNode = SectionPos.asLong(chunk.getPos().x(), chunk.getSectionYFromSectionIndex(index), chunk.getPos().z());
-            cache.addedEmptySections().remove(sectionNode);
-            cache.removedEmptySections().add(sectionNode);
-        }
     }
 
     private static void clearLight(ClientLevel level, ChunkPos pos) {
@@ -181,7 +122,7 @@ public final class ProjectionChunkStorage {
             light.queueSectionData(LightLayer.SKY, section, null);
             light.queueSectionData(LightLayer.BLOCK, section, null);
         }
-        for (int y = level.getMinSectionY(); y <= level.getMaxSectionY(); y++) {
+        for (int y = level.getMinSection(); y < level.getMaxSection(); y++) {
             light.updateSectionStatus(SectionPos.of(pos, y), true);
         }
     }

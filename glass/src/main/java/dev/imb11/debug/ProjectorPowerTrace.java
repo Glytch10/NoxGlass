@@ -14,7 +14,7 @@ public final class ProjectorPowerTrace {
     public static void changed(Level level, BlockPos pos, String channel, String cause, boolean wasActive, boolean active,
                                int revealDistance) {
         LOGGER.info("[GLASS projector] power side={} dimension={} pos={} channel={} cause={} active={}->{} reveal={} tick={}",
-                level.isClientSide() ? "client" : "server", level.dimension().identifier(), pos.toShortString(),
+                level.isClientSide ? "client" : "server", level.dimension().location(), pos.toShortString(),
                 channel, cause, wasActive, active, revealDistance, level.getGameTime());
     }
 }

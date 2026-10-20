@@ -57,6 +57,7 @@ public final class RemoteSceneClientManager {
     private static final long APPLY_BUDGET_NANOS = 2_000_000L;
     private static long clientTicks;
     private static long pendingBytes;
+    private static int pendingCount;
     private static ClientLevel mainLevel;
     private static boolean receiversRegistered;
 
@@ -158,7 +159,7 @@ public final class RemoteSceneClientManager {
             if (pending == null) {
                 break;
             }
-            accountDequeued(pending.state, pending.command.bytes());
+            accountDequeued(pending.state, pending.command);
             RemoteSceneHandle current = SUBSCRIPTIONS.get(pending.state.id);
             if (current == pending.state && current.scene != null && !current.terminalFailure) {
                 try {
@@ -170,7 +171,9 @@ public final class RemoteSceneClientManager {
             } else {
                 pending.state.discardedApplies++;
             }
-            applied++;
+            if (bounded(pending.command)) {
+                applied++;
+            }
         }
         for (RemoteClientScene scene : List.copyOf(SCENES.values())) {
             try {
@@ -342,10 +345,11 @@ public final class RemoteSceneClientManager {
             return;
         }
         state.highestSequence = command.sequence();
-        if (state.pendingCount >= MAX_PENDING_PER_SUBSCRIPTION
-                || PENDING.size() >= MAX_PENDING_GLOBAL
+        boolean bounded = bounded(command);
+        if (bounded && (state.pendingCount >= MAX_PENDING_PER_SUBSCRIPTION
+                || pendingCount >= MAX_PENDING_GLOBAL
                 || state.pendingBytes + command.bytes() > MAX_PENDING_BYTES_PER_SUBSCRIPTION
-                || pendingBytes + command.bytes() > MAX_PENDING_BYTES_GLOBAL) {
+                || pendingBytes + command.bytes() > MAX_PENDING_BYTES_GLOBAL)) {
             fail(state, S2CRemoteUnavailablePacket.Reason.BUDGET, true);
             return;
         }
@@ -353,7 +357,10 @@ public final class RemoteSceneClientManager {
             state.recordControl(control.chunk(), command.sequence(), control.loads());
         }
         PENDING.addLast(new PendingApply(state, command));
-        state.pendingCount++;
+        if (bounded) {
+            state.pendingCount++;
+            pendingCount++;
+        }
         state.pendingBytes += command.bytes();
         pendingBytes += command.bytes();
     }
@@ -443,14 +450,21 @@ public final class RemoteSceneClientManager {
                 continue;
             }
             iterator.remove();
-            accountDequeued(state, pending.command.bytes());
+            accountDequeued(state, pending.command);
         }
     }
 
-    private static void accountDequeued(RemoteSceneHandle state, long bytes) {
-        state.pendingCount = Math.max(0, state.pendingCount - 1);
-        state.pendingBytes = Math.max(0L, state.pendingBytes - bytes);
-        pendingBytes = Math.max(0L, pendingBytes - bytes);
+    private static void accountDequeued(RemoteSceneHandle state, SceneUpdate command) {
+        if (bounded(command)) {
+            state.pendingCount = Math.max(0, state.pendingCount - 1);
+            pendingCount = Math.max(0, pendingCount - 1);
+        }
+        state.pendingBytes = Math.max(0L, state.pendingBytes - command.bytes());
+        pendingBytes = Math.max(0L, pendingBytes - command.bytes());
+    }
+
+    private static boolean bounded(SceneUpdate command) {
+        return !(command instanceof UnloadUpdate);
     }
 
     private static void clear(boolean notifyServer) {
@@ -462,6 +476,7 @@ public final class RemoteSceneClientManager {
             }
         }
         PENDING.clear();
+        pendingCount = 0;
         ACKNOWLEDGEMENTS.clear();
         pendingBytes = 0L;
         for (RemoteClientScene scene : new ArrayList<>(SCENES.values())) {
@@ -619,7 +634,7 @@ public final class RemoteSceneClientManager {
         @Override
         public void apply(RemoteSceneHandle state) {
             state.scene.applyBlockEntities(state.id, updates.stream()
-                    .filter(update -> state.updateCurrent(ChunkPos.containing(update.getPos()), sequence))
+                    .filter(update -> state.updateCurrent(new ChunkPos(update.getPos()), sequence))
                     .toList());
         }
     }

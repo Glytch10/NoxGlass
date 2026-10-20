@@ -1,68 +1,46 @@
 package dev.imb11.client.renderer.block;
 
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.blaze3d.vertex.QuadInstance;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.mojang.math.Axis;
-import dev.imb11.blocks.GBlocks;
 import dev.imb11.blocks.TerminalBlock;
 import dev.imb11.blocks.entity.TerminalBlockEntity;
+import dev.imb11.items.GItems;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.SubmitNodeCollector;
-import net.minecraft.client.renderer.block.dispatch.BlockStateModel;
-import net.minecraft.client.renderer.block.dispatch.BlockStateModelPart;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.renderer.blockentity.BlockEntityRenderer;
 import net.minecraft.client.renderer.blockentity.BlockEntityRendererProvider;
-import net.minecraft.client.renderer.blockentity.state.BlockEntityRenderState;
-import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
-import net.minecraft.client.renderer.rendertype.RenderTypes;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.client.renderer.texture.OverlayTexture;
 import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.client.resources.model.geometry.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.phys.Vec3;
-import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public final class TerminalBlockEntityRenderer implements BlockEntityRenderer<TerminalBlockEntity, TerminalBlockEntityRenderer.State> {
-    private BlockStateModel bakedModel;
-    private List<BakedQuad> frame = List.of();
-    private List<BakedQuad> eye = List.of();
+public final class TerminalBlockEntityRenderer implements BlockEntityRenderer<TerminalBlockEntity> {
+    private BakedModel bakedModel;
+    private final List<BakedQuad> frame = new ArrayList<>();
+    private final List<BakedQuad> eye = new ArrayList<>();
     private final Vector3f eyeCenter = new Vector3f();
 
     public TerminalBlockEntityRenderer(BlockEntityRendererProvider.Context context) {
     }
 
     @Override
-    public State createRenderState() {
-        return new State();
-    }
-
-    @Override
-    public void extractRenderState(TerminalBlockEntity entity, State state, float partialTick, Vec3 camera,
-                                   ModelFeatureRenderer.CrumblingOverlay breaking) {
-        BlockEntityRenderer.super.extractRenderState(entity, state, partialTick, camera, breaking);
-        BlockStateModel model = Minecraft.getInstance().getModelManager().getBlockStateModelSet().get(
-                GBlocks.TERMINAL.defaultBlockState().setValue(TerminalBlock.FACING, Direction.SOUTH));
+    public void render(TerminalBlockEntity entity, float tickDelta, PoseStack matrices,
+                       MultiBufferSource buffers, int light, int overlay) {
+        BakedModel model = Minecraft.getInstance().getItemRenderer().getItemModelShaper().getItemModel(GItems.TERMINAL);
         if (model != bakedModel) {
             rebuild(model);
         }
-        state.frame = frame;
-        state.eye = eye;
-        state.eyeCenter.set(eyeCenter);
-        state.rotation.set(entity.getEyeRotation(partialTick));
-        state.facing = entity.getBlockState().getValue(TerminalBlock.FACING);
-    }
-
-    @Override
-    public void submit(State state, PoseStack matrices, SubmitNodeCollector collector, CameraRenderState camera) {
+        VertexConsumer vertices = buffers.getBuffer(RenderType.entityCutoutNoCull(TextureAtlas.LOCATION_BLOCKS));
         matrices.pushPose();
         matrices.translate(0.5D, 0.5D, 0.5D);
-        switch (state.facing) {
+        switch (entity.getBlockState().getValue(TerminalBlock.FACING)) {
             case NORTH -> matrices.mulPose(Axis.YP.rotationDegrees(-180.0F));
             case WEST -> matrices.mulPose(Axis.YP.rotationDegrees(-90.0F));
             case EAST -> matrices.mulPose(Axis.YP.rotationDegrees(-270.0F));
@@ -74,59 +52,50 @@ public final class TerminalBlockEntityRenderer implements BlockEntityRenderer<Te
             default -> {}
         }
         matrices.translate(-0.5D, -0.5D, -0.5D);
-        submitQuads(state.frame, matrices, collector, state.lightCoords);
-        matrices.translate(state.eyeCenter.x(), state.eyeCenter.y(), state.eyeCenter.z());
-        matrices.mulPose(state.rotation);
-        matrices.translate(-state.eyeCenter.x(), -state.eyeCenter.y(), -state.eyeCenter.z());
-        submitQuads(state.eye, matrices, collector, state.lightCoords);
+        renderQuads(frame, matrices, vertices, light, overlay);
+        matrices.translate(eyeCenter.x(), eyeCenter.y(), eyeCenter.z());
+        matrices.mulPose(entity.getEyeRotation(tickDelta));
+        matrices.translate(-eyeCenter.x(), -eyeCenter.y(), -eyeCenter.z());
+        renderQuads(eye, matrices, vertices, light, overlay);
         matrices.popPose();
     }
 
-    private void rebuild(BlockStateModel model) {
-        List<BakedQuad> frame = new ArrayList<>();
-        List<BakedQuad> eye = new ArrayList<>();
-        List<BlockStateModelPart> parts = new ArrayList<>();
-        model.collectParts(RandomSource.create(42L), parts);
-        for (BlockStateModelPart part : parts) {
-            List<BakedQuad> quads = new ArrayList<>(part.getQuads(null));
-            for (Direction direction : Direction.values()) {
-                quads.addAll(part.getQuads(direction));
-            }
-            for (BakedQuad quad : quads) {
-                (quad.materialInfo().tintIndex() == 1 ? eye : frame).add(quad);
-            }
-        }
+    private void rebuild(BakedModel model) {
+        frame.clear();
+        eye.clear();
         eyeCenter.zero();
+        RandomSource random = RandomSource.create(42L);
+        for (Direction face : Direction.values()) {
+            random.setSeed(42L);
+            addQuads(model.getQuads(null, face, random));
+        }
+        random.setSeed(42L);
+        addQuads(model.getQuads(null, null, random));
+        int vertexCount = 0;
         for (BakedQuad quad : eye) {
+            int[] data = quad.getVertices();
+            int stride = data.length / 4;
             for (int vertex = 0; vertex < 4; vertex++) {
-                eyeCenter.add(quad.position(vertex));
+                int offset = vertex * stride;
+                eyeCenter.add(Float.intBitsToFloat(data[offset]), Float.intBitsToFloat(data[offset + 1]), Float.intBitsToFloat(data[offset + 2]));
+                vertexCount++;
             }
         }
-        if (!eye.isEmpty()) {
-            eyeCenter.div(eye.size() * 4);
+        if (vertexCount > 0) {
+            eyeCenter.div(vertexCount);
         }
-        this.frame = List.copyOf(frame);
-        this.eye = List.copyOf(eye);
         bakedModel = model;
     }
 
-    private static void submitQuads(List<BakedQuad> quads, PoseStack matrices, SubmitNodeCollector collector, int light) {
-        collector.submitCustomGeometry(matrices, RenderTypes.entityCutout(TextureAtlas.LOCATION_BLOCKS), (pose, vertices) -> {
-            QuadInstance instance = new QuadInstance();
-            instance.setColor(-1);
-            instance.setLightCoords(light);
-            instance.setOverlayCoords(OverlayTexture.NO_OVERLAY);
-            for (BakedQuad quad : quads) {
-                vertices.putBakedQuad(pose, quad, instance);
-            }
-        });
+    private void addQuads(List<BakedQuad> quads) {
+        for (BakedQuad quad : quads) {
+            (quad.getTintIndex() == 1 ? eye : frame).add(quad);
+        }
     }
 
-    public static final class State extends BlockEntityRenderState {
-        private List<BakedQuad> frame = List.of();
-        private List<BakedQuad> eye = List.of();
-        private final Vector3f eyeCenter = new Vector3f();
-        private final Quaternionf rotation = new Quaternionf();
-        private Direction facing = Direction.SOUTH;
+    private static void renderQuads(List<BakedQuad> quads, PoseStack matrices, VertexConsumer vertices, int light, int overlay) {
+        for (BakedQuad quad : quads) {
+            vertices.putBulkData(matrices.last(), quad, 1.0F, 1.0F, 1.0F, 1.0F, light, overlay);
+        }
     }
 }

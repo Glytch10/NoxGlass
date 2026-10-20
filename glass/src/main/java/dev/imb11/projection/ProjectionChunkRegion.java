@@ -15,7 +15,7 @@ public record ProjectionChunkRegion(ChunkPos center, int radius) {
     }
 
     public boolean contains(int x, int z) {
-        return Math.abs((long) x - center.x()) <= radius && Math.abs((long) z - center.z()) <= radius;
+        return Math.abs((long) x - center.x) <= radius && Math.abs((long) z - center.z) <= radius;
     }
 
     public ProjectionChunkRegion withNeighbors() {
@@ -24,8 +24,8 @@ public record ProjectionChunkRegion(ChunkPos center, int radius) {
 
     public Set<ChunkPos> chunks() {
         Set<ChunkPos> chunks = new LinkedHashSet<>();
-        for (int x = center.x() - radius; x <= center.x() + radius; x++) {
-            for (int z = center.z() - radius; z <= center.z() + radius; z++) {
+        for (int x = center.x - radius; x <= center.x + radius; x++) {
+            for (int z = center.z - radius; z <= center.z + radius; z++) {
                 chunks.add(new ChunkPos(x, z));
             }
         }

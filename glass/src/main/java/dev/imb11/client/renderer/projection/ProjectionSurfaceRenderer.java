@@ -1,37 +1,32 @@
 package dev.imb11.client.renderer.projection;
 
+import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.Tesselator;
+import com.mojang.blaze3d.vertex.VertexBuffer;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.pipeline.BindGroupLayout;
-import net.minecraft.client.renderer.BindGroupLayouts;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import dev.imb11.projection.ProjectionSurface;
+import dev.imb11.client.ShaderRegistrar;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.renderer.blockentity.TheEndPortalRenderer;
+import net.minecraft.client.renderer.texture.TextureManager;
+import net.minecraft.client.renderer.RenderStateShard;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.pipeline.BlendFunction;
-import com.mojang.blaze3d.pipeline.ColorTargetState;
-import com.mojang.blaze3d.pipeline.DepthStencilState;
-import com.mojang.blaze3d.platform.CompareOp;
-import com.mojang.blaze3d.shaders.UniformType;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.client.renderer.blockentity.AbstractEndPortalRenderer;
-import com.mojang.blaze3d.textures.FilterMode;
-import com.mojang.blaze3d.textures.GpuSampler;
-import org.lwjgl.system.MemoryStack;
 
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Objects;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
@@ -49,41 +44,53 @@ public final class ProjectionSurfaceRenderer {
     private static final String[] PROJECTION_SAMPLERS = {"Projection0", "Projection1", "Projection2", "Projection3"};
     private static final String PORTAL_SKY_SAMPLER = "PortalSky";
     private static final String PORTAL_LAYERS_SAMPLER = "PortalLayers";
-    private static final Identifier SHADER_LOCATION =
-            Identifier.fromNamespaceAndPath("glass", "core/projection_surface");
+    private static final ResourceLocation SHADER_LOCATION =
+            ResourceLocation.fromNamespaceAndPath("glass", "projection_surface");
     private static final Map<ClientLevel, Map<BlockPos, CachedMesh>> CACHED_MESHES = new IdentityHashMap<>();
+    private static final Map<ResourceLocation, RenderType> SURFACE_TYPES = new HashMap<>();
     private static ClientLevel activeLevel;
     private static List<Projection> projections = List.of();
     private static final Map<FaceKey, SharedFace> SHARED_FACES = new HashMap<>();
     private static final Map<BlockPos, List<Projection>> GROUPS = new HashMap<>();
     private static final Map<EdgeKey, EnumSet<Direction>> SHARED_EDGE_NORMALS = new HashMap<>();
     private static long layoutVersion;
-    private static final RenderPipeline SURFACE_PIPELINE = pipeline(false);
-    private static final RenderPipeline LOADING_PIPELINE = pipeline(true);
+    private static volatile ShaderInstance shader;
+    private static Uniform revealProgressUniform;
+    private static Uniform loadingOpacityUniform;
+    private static Uniform crossfadeWidthUniform;
+    private static Uniform projectionChannelsUniform;
+    private static Uniform staticAmountsUniform;
+    private static final Uniform[] PROJECTOR_POSITION_UNIFORMS = new Uniform[MAX_PROJECTIONS];
+    private static boolean uniformsReady;
+    private static final RenderStateShard.ShaderStateShard PROJECTION_SURFACE_SHADER =
+            new RenderStateShard.ShaderStateShard(() -> shader);
+    private static final RenderType LOADING_SURFACE_TYPE = RenderType.create(
+            "glass_projection_loading",
+            DefaultVertexFormat.POSITION_TEX_COLOR,
+            VertexFormat.Mode.QUADS,
+            1536,
+            false,
+            false,
+            RenderType.CompositeState.builder()
+                    .setShaderState(PROJECTION_SURFACE_SHADER)
+                    .setTransparencyState(RenderStateShard.TRANSLUCENT_TRANSPARENCY)
+                    .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                    .setCullState(RenderStateShard.NO_CULL)
+                    .setLightmapState(RenderStateShard.NO_LIGHTMAP)
+                    .setOverlayState(RenderStateShard.NO_OVERLAY)
+                    .setWriteMaskState(RenderStateShard.COLOR_WRITE)
+                    .createCompositeState(false)
+    );
 
     private ProjectionSurfaceRenderer() {
     }
 
-    private static RenderPipeline pipeline(boolean loading) {
-        var builder = RenderPipeline.builder()
-                .withLocation(Identifier.fromNamespaceAndPath("glass", loading ? "projection_loading" : "projection_surface"))
-                .withVertexShader(SHADER_LOCATION).withFragmentShader(SHADER_LOCATION)
-                .withVertexBinding(0, DefaultVertexFormat.POSITION_TEX_COLOR)
-                .withPrimitiveTopology(PrimitiveTopology.QUADS)
-                .withBindGroupLayout(BindGroupLayouts.MATRICES_PROJECTION)
-                .withBindGroupLayout(BindGroupLayouts.GLOBALS)
-                .withDepthStencilState(new DepthStencilState(CompareOp.GREATER_THAN_OR_EQUAL, !loading))
-                .withCull(false);
-        var surfaceLayout = BindGroupLayout.builder().withUniform("SurfaceParameters", UniformType.UNIFORM_BUFFER);
-        for (String sampler : PROJECTION_SAMPLERS) {
-            surfaceLayout.withSampler(sampler);
-        }
-        surfaceLayout.withSampler(PORTAL_SKY_SAMPLER).withSampler(PORTAL_LAYERS_SAMPLER);
-        builder.withBindGroupLayout(surfaceLayout.build());
-        if (loading) {
-            builder.withColorTargetState(new ColorTargetState(BlendFunction.TRANSLUCENT));
-        }
-        return builder.build();
+    public static void registerShader(ShaderRegistrar context) throws IOException {
+        context.register(
+                SHADER_LOCATION,
+                DefaultVertexFormat.POSITION_TEX_COLOR,
+                ProjectionSurfaceRenderer::onShaderLoaded
+        );
     }
 
     public static void prepare(ClientLevel level, List<Projection> visibleProjections) {
@@ -175,63 +182,91 @@ public final class ProjectionSurfaceRenderer {
         return index;
     }
 
-    public static void render(ClientLevel level, BlockPos projectorPos, ProjectionSurface surface,
-                              @Nullable ProjectionRenderManager.ProjectionFeed feed, PoseStack matrices, float loadingOpacity) {
+    public static void render(
+            ClientLevel level,
+            BlockPos projectorPos,
+            ProjectionSurface surface,
+            @Nullable ProjectionRenderManager.ProjectionFeed feed,
+            PoseStack matrices,
+            float loadingOpacity
+    ) {
+        RenderSystem.assertOnRenderThread();
+        ShaderInstance currentShader = shader;
         boolean loading = loadingOpacity >= 0.0F;
         if (!loading && !ProjectionRenderManager.isReady(feed)) {
             return;
         }
-        CachedMesh mesh = getOrBuild(level, projectorPos, surface, loading);
-        if (mesh == null) {
+        int textureId = loading ? 0 : feed.colorTextureId();
+        if (currentShader == null || !uniformsReady || !loading && textureId <= 0) {
             return;
         }
-        float[] reveals = {-1, -1, -1, -1};
-        float[] channels = {0, 1, 2, 3};
-        float[] positions = new float[16];
-        Map<String, GpuTextureView> textures = new HashMap<>();
-        TextureManager textureManager = Minecraft.getInstance().getTextureManager();
-        GpuTextureView fallback = feed == null ? null : feed.colorTextureView();
-        if (fallback == null) {
-            fallback = textureManager.getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
+
+        CachedMesh cachedMesh = getOrBuild(level, projectorPos, surface, loading);
+        if (cachedMesh == null) {
+            return;
         }
-        textures.put(PORTAL_SKY_SAMPLER, textureManager.getTexture(AbstractEndPortalRenderer.END_SKY_LOCATION).getTextureView());
-        textures.put(PORTAL_LAYERS_SAMPLER, textureManager.getTexture(AbstractEndPortalRenderer.END_PORTAL_LOCATION).getTextureView());
-        GpuSampler repeat = RenderSystem.getSamplerCache().getRepeat(FilterMode.NEAREST);
-        Map<String, GpuSampler> samplers = Map.of(PORTAL_SKY_SAMPLER, repeat, PORTAL_LAYERS_SAMPLER, repeat);
-        List<Projection> group = GROUPS.getOrDefault(projectorPos, List.of());
-        for (int index = 0; index < MAX_PROJECTIONS; index++) {
-            Projection projection = index < group.size() ? group.get(index) : null;
-            textures.put(PROJECTION_SAMPLERS[index], projection == null ? fallback : projection.feed().colorTextureView());
-            if (projection != null) {
-                for (int previous = 0; previous < index; previous++) {
-                    if (group.get(previous).feed().source().equals(projection.feed().source())) {
-                        channels[index] = channels[previous];
-                        break;
+
+        RenderType surfaceType = loading ? LOADING_SURFACE_TYPE : getSurfaceType(feed.textureLocation());
+
+        matrices.pushPose();
+        try {
+            BlockPos originOffset = cachedMesh.origin.subtract(projectorPos);
+            matrices.translate(originOffset.getX(), originOffset.getY(), originOffset.getZ());
+            try {
+                surfaceType.setupRenderState();
+                float[] revealDistances = {-1.0F, -1.0F, -1.0F, -1.0F};
+                float[] channels = {0.0F, 1.0F, 2.0F, 3.0F};
+                float[] staticAmounts = {0.0F, 0.0F, 0.0F, 0.0F};
+                TextureManager textureManager = Minecraft.getInstance().getTextureManager();
+                currentShader.setSampler(PORTAL_SKY_SAMPLER, textureManager.getTexture(TheEndPortalRenderer.END_SKY_LOCATION).getId());
+                currentShader.setSampler(PORTAL_LAYERS_SAMPLER, textureManager.getTexture(TheEndPortalRenderer.END_PORTAL_LOCATION).getId());
+                List<Projection> group = GROUPS.getOrDefault(projectorPos, List.of());
+                for (int index = 0; index < MAX_PROJECTIONS; index++) {
+                    Projection projection = index < group.size() ? group.get(index) : null;
+                    currentShader.setSampler(PROJECTION_SAMPLERS[index], projection == null ? textureId : projection.feed().colorTextureId());
+                    Uniform positionUniform = PROJECTOR_POSITION_UNIFORMS[index];
+                    if (projection == null) {
+                        positionUniform.set(0.0F, 0.0F, 0.0F);
+                    } else {
+                        for (int previous = 0; previous < index; previous++) {
+                            if (group.get(previous).feed().source().equals(projection.feed().source())) {
+                                channels[index] = channels[previous];
+                                break;
+                            }
+                        }
+                        if (!loading && (cachedMesh.projectionMask & 1 << index) != 0) {
+                            ProjectionRenderManager.markVisible(projection.feed());
+                        }
+                        revealDistances[index] = projection.revealProgress();
+                        BlockPos offset = projection.surface().origin().subtract(cachedMesh.origin);
+                        Direction facing = projection.surface().facing();
+                        positionUniform.set(
+                                offset.getX() + 0.5F + facing.getStepX() * 0.5F,
+                                offset.getY() + 0.5F + facing.getStepY() * 0.5F,
+                                offset.getZ() + 0.5F + facing.getStepZ() * 0.5F
+                        );
+                        staticAmounts[index] = projection.feed().staticAmount();
                     }
                 }
-                if (!loading && (mesh.projectionMask & 1 << index) != 0) {
-                    ProjectionRenderManager.markVisible(projection.feed());
-                }
-                reveals[index] = projection.revealProgress();
-                BlockPos offset = projection.surface().origin().subtract(mesh.origin);
-                Direction facing = projection.surface().facing();
-                positions[index * 4] = offset.getX() + 0.5F + facing.getStepX() * 0.5F;
-                positions[index * 4 + 1] = offset.getY() + 0.5F + facing.getStepY() * 0.5F;
-                positions[index * 4 + 2] = offset.getZ() + 0.5F + facing.getStepZ() * 0.5F;
-                positions[index * 4 + 3] = projection.feed().staticAmount();
+                staticAmountsUniform.set(staticAmounts[0], staticAmounts[1], staticAmounts[2], staticAmounts[3]);
+                revealProgressUniform.set(revealDistances[0], revealDistances[1], revealDistances[2], revealDistances[3]);
+                loadingOpacityUniform.set(loadingOpacity);
+                crossfadeWidthUniform.set(CROSSFADE_WIDTH);
+                projectionChannelsUniform.set(channels[0], channels[1], channels[2], channels[3]);
+                cachedMesh.vertexBuffer.bind();
+                Matrix4f modelView = new Matrix4f(RenderSystem.getModelViewMatrix())
+                        .mul(matrices.last().pose());
+                cachedMesh.vertexBuffer.drawWithShader(
+                        modelView,
+                        RenderSystem.getProjectionMatrix(),
+                        currentShader
+                );
+            } finally {
+                VertexBuffer.unbind();
+                surfaceType.clearRenderState();
             }
-        }
-        BlockPos offset = mesh.origin.subtract(projectorPos);
-        Matrix4f pose = new Matrix4f(matrices.last().pose()).translate(offset.getX(), offset.getY(), offset.getZ());
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            var data = stack.malloc(112);
-            for (float value : reveals) data.putFloat(value);
-            for (float value : channels) data.putFloat(value);
-            for (float value : positions) data.putFloat(value);
-            data.putFloat(loadingOpacity).putFloat(CROSSFADE_WIDTH).putFloat(0).putFloat(0).flip();
-            try (GpuBuffer parameters = RenderSystem.getDevice().createBuffer(() -> "GLASS surface parameters", GpuBuffer.USAGE_UNIFORM, data)) {
-                mesh.vertexBuffer.draw(loading ? LOADING_PIPELINE : SURFACE_PIPELINE, pose, textures, samplers, parameters);
-            }
+        } finally {
+            matrices.popPose();
         }
     }
 
@@ -245,6 +280,46 @@ public final class ProjectionSurfaceRenderer {
 
     public static void reset() {
         RenderResources.runOnRenderThread(ProjectionSurfaceRenderer::resetNow);
+    }
+
+    static void releaseTexture(ResourceLocation textureLocation) {
+        SURFACE_TYPES.remove(textureLocation);
+    }
+
+    private static void onShaderLoaded(ShaderInstance loadedShader) {
+        resetNow();
+        shader = loadedShader;
+        revealProgressUniform = loadedShader.getUniform("RevealProgress");
+        loadingOpacityUniform = loadedShader.getUniform("LoadingOpacity");
+        crossfadeWidthUniform = loadedShader.getUniform("CrossfadeWidth");
+        projectionChannelsUniform = loadedShader.getUniform("ProjectionChannels");
+        staticAmountsUniform = loadedShader.getUniform("StaticAmounts");
+        for (int index = 0; index < MAX_PROJECTIONS; index++) {
+            PROJECTOR_POSITION_UNIFORMS[index] = loadedShader.getUniform("ProjectorPosition" + index);
+        }
+        uniformsReady = revealProgressUniform != null && loadingOpacityUniform != null && crossfadeWidthUniform != null
+                && projectionChannelsUniform != null && staticAmountsUniform != null && Arrays.stream(PROJECTOR_POSITION_UNIFORMS).allMatch(Objects::nonNull);
+    }
+
+    private static RenderType getSurfaceType(ResourceLocation textureLocation) {
+        return SURFACE_TYPES.computeIfAbsent(textureLocation, location -> RenderType.create(
+                "glass_projection_surface_" + location.getPath().replace('/', '_'),
+                DefaultVertexFormat.POSITION_TEX_COLOR,
+                VertexFormat.Mode.QUADS,
+                1536,
+                false,
+                false,
+                RenderType.CompositeState.builder()
+                        .setShaderState(PROJECTION_SURFACE_SHADER)
+                        .setTextureState(new RenderStateShard.TextureStateShard(location, true, false))
+                        .setTransparencyState(RenderStateShard.NO_TRANSPARENCY)
+                        .setDepthTestState(RenderStateShard.LEQUAL_DEPTH_TEST)
+                        .setCullState(RenderStateShard.NO_CULL)
+                        .setLightmapState(RenderStateShard.NO_LIGHTMAP)
+                        .setOverlayState(RenderStateShard.NO_OVERLAY)
+                        .setWriteMaskState(RenderStateShard.COLOR_DEPTH_WRITE)
+                        .createCompositeState(false)
+        ));
     }
 
     private static CachedMesh getOrBuild(ClientLevel level, BlockPos projectorPos, ProjectionSurface surface, boolean loading) {
@@ -292,12 +367,26 @@ public final class ProjectionSurfaceRenderer {
         if (faceGeometries.isEmpty()) {
             return new CachedMesh(surface, loading, projectionMask, null);
         }
-        BufferBuilder builder = ProjectionMesh.begin(DefaultVertexFormat.POSITION_TEX_COLOR);
+        BufferBuilder builder = Tesselator.getInstance().begin(
+                VertexFormat.Mode.QUADS,
+                DefaultVertexFormat.POSITION_TEX_COLOR
+        );
         for (FaceGeometry geometry : faceGeometries) {
             emitFace(builder, surface.origin(), geometry, edgeNormals);
         }
 
-        ProjectionMesh vertexBuffer = new ProjectionMesh(builder.buildOrThrow());
+        VertexBuffer vertexBuffer = new VertexBuffer(VertexBuffer.Usage.STATIC);
+        boolean uploaded = false;
+        try {
+            vertexBuffer.bind();
+            vertexBuffer.upload(builder.buildOrThrow());
+            uploaded = true;
+        } finally {
+            VertexBuffer.unbind();
+            if (!uploaded) {
+                vertexBuffer.close();
+            }
+        }
         return new CachedMesh(surface, loading, projectionMask, vertexBuffer);
     }
 
@@ -441,6 +530,7 @@ public final class ProjectionSurfaceRenderer {
     private static void resetNow() {
         CACHED_MESHES.values().forEach(levelMeshes -> levelMeshes.values().forEach(CachedMesh::close));
         CACHED_MESHES.clear();
+        SURFACE_TYPES.clear();
         projections = List.of();
         SHARED_FACES.clear();
         GROUPS.clear();
@@ -455,13 +545,13 @@ public final class ProjectionSurfaceRenderer {
         private final long layoutVersion;
         private final boolean loading;
         private final int projectionMask;
-        private final ProjectionMesh vertexBuffer;
+        private final VertexBuffer vertexBuffer;
 
         private CachedMesh(
                 ProjectionSurface surface,
                 boolean loading,
                 int projectionMask,
-                ProjectionMesh vertexBuffer
+                VertexBuffer vertexBuffer
         ) {
             this.surface = surface;
             this.origin = surface.origin().immutable();

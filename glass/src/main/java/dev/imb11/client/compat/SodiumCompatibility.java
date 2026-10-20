@@ -6,7 +6,7 @@ import net.caffeinemc.mods.sodium.client.render.chunk.map.ChunkTrackerHolder;
 import net.caffeinemc.mods.sodium.client.render.texture.SpriteContentsExtension;
 import dev.imb11.platform.Platform;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.renderer.texture.TextureAtlasSprite;
+import net.minecraft.client.renderer.texture.SpriteContents;
 import net.minecraft.world.level.ChunkPos;
 
 import java.util.List;
@@ -17,7 +17,7 @@ public final class SodiumCompatibility {
     private SodiumCompatibility() {
     }
 
-    public static void onChunkReadyToRender(ClientLevel level, ChunkPos pos) {
+    public static void onChunkLoaded(ClientLevel level, ChunkPos pos) {
         if (LOADED) {
             SodiumAccess.loaded(level, pos);
         }
@@ -29,7 +29,7 @@ public final class SodiumCompatibility {
         }
     }
 
-    public static void activateProjectionTextures(List<TextureAtlasSprite> sprites) {
+    public static void activateProjectionTextures(List<SpriteContents> sprites) {
         if (LOADED && ProjectionRenderManager.hasVisibleProjection()) {
             SodiumAccess.activateTextures(sprites);
         }
@@ -37,16 +37,16 @@ public final class SodiumCompatibility {
 
     private static final class SodiumAccess {
         private static void loaded(ClientLevel level, ChunkPos pos) {
-            ChunkTrackerHolder.get(level).onChunkStatusAdded(pos.x(), pos.z(), ChunkStatus.FLAG_HAS_BLOCK_DATA);
+            ChunkTrackerHolder.get(level).onChunkStatusAdded(pos.x, pos.z, ChunkStatus.FLAG_HAS_BLOCK_DATA);
         }
 
         private static void unloaded(ClientLevel level, ChunkPos pos) {
-            ChunkTrackerHolder.get(level).onChunkStatusRemoved(pos.x(), pos.z(), ChunkStatus.FLAG_ALL);
+            ChunkTrackerHolder.get(level).onChunkStatusRemoved(pos.x, pos.z, ChunkStatus.FLAG_ALL);
         }
 
-        private static void activateTextures(List<TextureAtlasSprite> sprites) {
-            for (TextureAtlasSprite sprite : sprites) {
-                if (sprite.contents() instanceof SpriteContentsExtension extension && extension.sodium$hasAnimation()) {
+        private static void activateTextures(List<SpriteContents> sprites) {
+            for (SpriteContents sprite : sprites) {
+                if (sprite instanceof SpriteContentsExtension extension && extension.sodium$hasAnimation()) {
                     extension.sodium$setActive(true);
                 }
             }

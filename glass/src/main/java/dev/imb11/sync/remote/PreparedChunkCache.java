@@ -22,7 +22,7 @@ final class PreparedChunkCache {
     private long bytes;
 
     PreparedChunk find(ServerLevel level, LevelChunk chunk) {
-        Key key = new Key(level.dimension(), chunk.getPos().pack());
+        Key key = new Key(level.dimension(), chunk.getPos().toLong());
         PreparedChunk prepared = chunks.get(key);
         if (prepared != null && (prepared.chunk.get() != chunk
                 || (!chunk.getBlockEntities().isEmpty() && prepared.createdTick != level.getServer().getTickCount())
@@ -54,14 +54,14 @@ final class PreparedChunkCache {
             buffer.release();
         }
         PreparedChunk prepared = new PreparedChunk(chunk, packet, size, level.getServer().getTickCount());
-        chunks.put(new Key(level.dimension(), chunk.getPos().pack()), prepared);
+        chunks.put(new Key(level.dimension(), chunk.getPos().toLong()), prepared);
         bytes += prepared.size;
         trim(level.getServer().getTickCount());
         return prepared;
     }
 
     void invalidate(ResourceKey<Level> dimension, ChunkPos pos) {
-        PreparedChunk removed = chunks.remove(new Key(dimension, pos.pack()));
+        PreparedChunk removed = chunks.remove(new Key(dimension, pos.toLong()));
         if (removed != null) {
             bytes -= removed.size;
         }

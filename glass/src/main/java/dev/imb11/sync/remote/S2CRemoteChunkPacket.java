@@ -3,13 +3,13 @@ package dev.imb11.sync.remote;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 
 public record S2CRemoteChunkPacket(RemoteSubscriptionId subscription, long sequence, ClientboundLevelChunkWithLightPacket data, int encodedBytes) implements CustomPacketPayload {
     public static final int MAX_BYTES = 983040;
-    public static final Type<S2CRemoteChunkPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_chunk"));
+    public static final Type<S2CRemoteChunkPacket> PACKET_ID = new Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remote_chunk"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteChunkPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteChunkPacket::write, S2CRemoteChunkPacket::read);
 
     @Override

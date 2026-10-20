@@ -5,15 +5,15 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.dimension.DimensionType;
 
 import java.util.Objects;
 
-public record S2CRemoteSubscriptionPacket(RemoteSubscriptionId subscription, ChunkPos grantedCenter, int grantedRadius, ResourceKey<DimensionType> dimensionType, Difficulty difficulty, boolean hardcore, boolean debug, boolean flat, long seedHash, int seaLevel, RemoteWorldState state) implements CustomPacketPayload {
-    public static final Type<S2CRemoteSubscriptionPacket> PACKET_ID = new Type<>(Identifier.fromNamespaceAndPath("glass", "remote_subscription"));
+public record S2CRemoteSubscriptionPacket(RemoteSubscriptionId subscription, ChunkPos grantedCenter, int grantedRadius, ResourceKey<DimensionType> dimensionType, Difficulty difficulty, boolean hardcore, boolean debug, boolean flat, long seedHash, RemoteWorldState state) implements CustomPacketPayload {
+    public static final Type<S2CRemoteSubscriptionPacket> PACKET_ID = new Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remote_subscription"));
     public static final StreamCodec<RegistryFriendlyByteBuf, S2CRemoteSubscriptionPacket> PACKET_CODEC = StreamCodec.ofMember(S2CRemoteSubscriptionPacket::write, S2CRemoteSubscriptionPacket::read);
 
     public S2CRemoteSubscriptionPacket {
@@ -34,16 +34,15 @@ public record S2CRemoteSubscriptionPacket(RemoteSubscriptionId subscription, Chu
 
     private void write(RegistryFriendlyByteBuf buf) {
         subscription.write(buf);
-        buf.writeInt(grantedCenter.x());
-        buf.writeInt(grantedCenter.z());
+        buf.writeInt(grantedCenter.x);
+        buf.writeInt(grantedCenter.z);
         buf.writeVarInt(grantedRadius);
-        buf.writeIdentifier(dimensionType.identifier());
+        buf.writeResourceLocation(dimensionType.location());
         buf.writeEnum(difficulty);
         buf.writeBoolean(hardcore);
         buf.writeBoolean(debug);
         buf.writeBoolean(flat);
         buf.writeLong(seedHash);
-        buf.writeInt(seaLevel);
         state.write(buf);
     }
 
@@ -51,13 +50,12 @@ public record S2CRemoteSubscriptionPacket(RemoteSubscriptionId subscription, Chu
         RemoteSubscriptionId subscription = RemoteSubscriptionId.read(buf);
         ChunkPos grantedCenter = new ChunkPos(buf.readInt(), buf.readInt());
         int grantedRadius = buf.readVarInt();
-        ResourceKey<DimensionType> dimensionType = ResourceKey.create(Registries.DIMENSION_TYPE, buf.readIdentifier());
+        ResourceKey<DimensionType> dimensionType = ResourceKey.create(Registries.DIMENSION_TYPE, buf.readResourceLocation());
         Difficulty difficulty = buf.readEnum(Difficulty.class);
         boolean hardcore = buf.readBoolean();
         boolean debug = buf.readBoolean();
         boolean flat = buf.readBoolean();
         long seedHash = buf.readLong();
-        int seaLevel = buf.readInt();
-        return new S2CRemoteSubscriptionPacket(subscription, grantedCenter, grantedRadius, dimensionType, difficulty, hardcore, debug, flat, seedHash, seaLevel, RemoteWorldState.read(buf));
+        return new S2CRemoteSubscriptionPacket(subscription, grantedCenter, grantedRadius, dimensionType, difficulty, hardcore, debug, flat, seedHash, RemoteWorldState.read(buf));
     }
 }

@@ -1,4 +1,5 @@
 import me.modmuss50.mpp.PublishModTask
+import me.modmuss50.mpp.ReleaseType
 import me.modmuss50.mpp.platforms.modrinth.ModrinthEnvironment
 
 plugins {
@@ -18,9 +19,12 @@ val releaseChangelog = providers.fileContents(layout.projectDirectory.file("CHAN
     require(notes.isNotBlank()) { "Empty changelog section for ${modData.id} ${modData.version}" }
     notes
 }
+val publishMinecraftVersions = providers.gradleProperty("${modData.id}.publishMinecraftVersions").orNull
+    ?.split(',')?.map(String::trim)?.filter(String::isNotEmpty).orEmpty()
+val publishType = providers.gradleProperty("${modData.id}.publishType").orNull
 val targetProjects = childProjects.values.sortedBy { it.name }.onEach { node ->
     evaluationDependsOn(node.path)
-}
+}.filter { publishMinecraftVersions.isEmpty() || it.minecraftVersion in publishMinecraftVersions }
 
 val assemble = tasks.register("assemble") {
     group = "build"
@@ -48,6 +52,7 @@ publishMods {
     displayName = "${modData.required("mod.name")} ${modData.version}"
     changelog = releaseChangelog
     type = when {
+        publishType != null -> ReleaseType.valueOf(publishType.uppercase())
         modData.version.contains("alpha", ignoreCase = true) -> ALPHA
         Regex("beta|edge|rc|snapshot", RegexOption.IGNORE_CASE).containsMatchIn(modData.version) -> BETA
         else -> STABLE
@@ -72,6 +77,7 @@ publishMods {
 
         modrinth("modrinth$targetName") {
             from(options.get())
+            version = "$releaseVersion-$loader".takeIf { it.length <= 32 } ?: "${modData.version}-${if (loader == "fabric") "fabric" else "neo"}"
             projectId = modData.required("publish.modrinth")
             accessToken = providers.environmentVariable("MODRINTH_TOKEN")
             minecraftVersions.add(minecraftVersion)

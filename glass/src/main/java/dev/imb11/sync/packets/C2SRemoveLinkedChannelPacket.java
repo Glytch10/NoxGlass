@@ -8,10 +8,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 public record C2SRemoveLinkedChannelPacket(BlockPos pos) implements CustomPacketPayload {
-    public static final CustomPacketPayload.Type<C2SRemoveLinkedChannelPacket> PACKET_ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("glass", "remove_linked_channel"));
+    public static final CustomPacketPayload.Type<C2SRemoveLinkedChannelPacket> PACKET_ID = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("glass", "remove_linked_channel"));
     public static final StreamCodec<RegistryFriendlyByteBuf, C2SRemoveLinkedChannelPacket> PACKET_CODEC = StreamCodec.ofMember((value, buf) -> buf.writeBlockPos(value.pos()), buf -> new C2SRemoveLinkedChannelPacket(buf.readBlockPos()));
 
     @Override
@@ -23,7 +23,7 @@ public record C2SRemoveLinkedChannelPacket(BlockPos pos) implements CustomPacket
         if (!GNetworking.canUseTerminal(player, payload.pos())) {
             return;
         }
-        var level = player.level();
+        var level = player.serverLevel();
         if (level.getBlockEntity(payload.pos()) instanceof TerminalBlockEntity terminal) {
             terminal.setChannelFromServer("");
             ChannelManagerPersistence.get(level).unlinkTerminal(level, payload.pos());

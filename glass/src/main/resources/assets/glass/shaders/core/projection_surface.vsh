@@ -1,11 +1,11 @@
-#version 330
+#version 150
 
 in vec3 Position;
 in vec2 UV0;
 in vec4 Color;
 
-#moj_import <minecraft:dynamictransforms.glsl>
-#moj_import <minecraft:projection.glsl>
+uniform mat4 ModelViewMat;
+uniform mat4 ProjMat;
 
 noperspective out vec2 screenUv;
 out vec3 surfacePosition;

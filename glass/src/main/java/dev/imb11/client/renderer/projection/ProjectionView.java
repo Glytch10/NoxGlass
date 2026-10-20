@@ -37,7 +37,7 @@ record ProjectionView(
     }
 
     Vec3 normal() {
-        return Vec3.atLowerCornerOf(facing.getUnitVec3i());
+        return Vec3.atLowerCornerOf(facing.getNormal());
     }
 
     boolean planar() {

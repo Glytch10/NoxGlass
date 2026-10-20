@@ -10,8 +10,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.world.level.storage.ValueInput;
-import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.codec.StreamCodec;
@@ -35,7 +33,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public class TerminalBlockEntity extends PlatformBlockEntity implements ExtendedMenuProvider<BlockPos> {
-    public static BlockEntityType<TerminalBlockEntity> BLOCK_ENTITY_TYPE = new BlockEntityType<>(TerminalBlockEntity::new, java.util.Set.of(GBlocks.TERMINAL));
+    public static BlockEntityType<TerminalBlockEntity> BLOCK_ENTITY_TYPE = BlockEntityType.Builder.of(TerminalBlockEntity::new, GBlocks.TERMINAL).build(null);
 
     private String channel = "";
     private Direction reconciledFacing;
@@ -52,7 +50,7 @@ public class TerminalBlockEntity extends PlatformBlockEntity implements Extended
     }
 
     public static void tick(Level level, BlockPos pos, BlockState state, TerminalBlockEntity terminal) {
-        if (level.isClientSide()) {
+        if (level.isClientSide) {
             terminal.previousEyeRotation.set(terminal.eyeRotation);
             if (state.getValue(TerminalBlock.PROJECTING)) {
                 if (terminal.eyeDirectionTicks-- <= 0) {
@@ -88,15 +86,15 @@ public class TerminalBlockEntity extends PlatformBlockEntity implements Extended
     }
 
     @Override
-    public void saveAdditional(ValueOutput tag) {
-        super.saveAdditional(tag);
+    public void saveAdditional(CompoundTag tag, HolderLookup.Provider lookup) {
+        super.saveAdditional(tag, lookup);
         tag.putString("channel", channel);
     }
 
     @Override
-    public void loadAdditional(ValueInput tag) {
-        super.loadAdditional(tag);
-        channel = tag.getStringOr("channel", "");
+    public void loadAdditional(CompoundTag tag, HolderLookup.Provider lookup) {
+        super.loadAdditional(tag, lookup);
+        channel = tag.getString("channel");
     }
 
     public String getChannel() {
@@ -110,7 +108,7 @@ public class TerminalBlockEntity extends PlatformBlockEntity implements Extended
         }
         this.channel = value;
         setChanged();
-        if (level != null && !level.isClientSide()) {
+        if (level != null && !level.isClientSide) {
             BlockState state = getBlockState();
             level.sendBlockUpdated(worldPosition, state, state, Block.UPDATE_CLIENTS);
         }

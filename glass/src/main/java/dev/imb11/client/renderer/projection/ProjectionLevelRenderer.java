@@ -1,485 +1,175 @@
 package dev.imb11.client.renderer.projection;
 
-import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
+import com.mojang.blaze3d.shaders.Uniform;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.ProjectionType;
-import dev.imb11.client.compat.IrisCompatibility;
+import com.mojang.blaze3d.vertex.VertexBuffer;
+import com.mojang.blaze3d.vertex.VertexFormat;
+import dev.imb11.client.compat.SableRenderCompatibility;
 import dev.imb11.mixins.LevelRendererBufferAccessor;
-import dev.imb11.platform.LevelRenderContexts;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.DeltaTracker;
-import net.minecraft.client.SectionUpdateTracker;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.client.renderer.ItemBlockRenderTypes;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.RenderBuffers;
-import net.minecraft.client.renderer.ProjectionMatrixBuffer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.ShaderInstance;
 import net.minecraft.client.renderer.ViewArea;
-import net.minecraft.client.renderer.chunk.RenderRegionCache;
-import net.minecraft.client.renderer.chunk.SectionCompiler;
 import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
-import net.minecraft.client.renderer.fog.FogRenderer;
-import net.minecraft.client.renderer.state.GameRenderState;
-import net.minecraft.core.SectionPos;
-import net.minecraft.util.Util;
-import net.minecraft.world.level.ChunkPos;
-import org.joml.Matrix4f;
-
-import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
-import dev.imb11.mixins.ProjectionRendererAccessor;
-import net.minecraft.client.Camera;
-import net.minecraft.client.CloudStatus;
-import net.minecraft.client.renderer.GlobalSettingsUniform;
-import net.minecraft.client.renderer.LevelTargetBundle;
-import net.minecraft.client.renderer.SkyRenderer;
-import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.state.level.BlockBreakingRenderState;
-import net.minecraft.client.renderer.state.level.LevelRenderState;
 import net.minecraft.core.BlockPos;
-import net.minecraft.server.level.BlockDestructionProgress;
-import net.minecraft.util.ARGB;
-import net.minecraft.util.profiling.Profiler;
-import net.minecraft.world.attribute.EnvironmentAttributes;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.core.SectionPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Vector4f;
-
-import com.mojang.blaze3d.IndexType;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
-import com.mojang.blaze3d.systems.RenderPass;
-import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.vertex.VertexFormat;
-import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import net.minecraft.client.renderer.DynamicUniforms;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayer;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
-import net.minecraft.client.renderer.chunk.SectionMesh;
-import net.minecraft.client.renderer.texture.TextureAtlas;
-import org.joml.Matrix4fc;
-
-import java.util.ArrayList;
-import java.util.EnumMap;
-import java.util.List;
-import java.util.Locale;
-import java.util.SortedSet;
+import org.jetbrains.annotations.Nullable;
+import org.joml.Matrix4f;
 
 public class ProjectionLevelRenderer extends LevelRenderer {
     private final Minecraft minecraft;
     private final RenderBuffers buffers;
     private final int renderDistance;
-    private final GameRenderState state = new GameRenderState();
-    private final FeatureRenderDispatcher features;
-    private final List<FogRenderer> fogs = new ArrayList<>();
-    private long fogFrame = -1L;
-    private int fogUses;
-    private final ProjectionMatrixBuffer projectionBuffer = new ProjectionMatrixBuffer("GLASS projection");
-    private final ProjectionMatrixBuffer skyProjectionBuffer = new ProjectionMatrixBuffer("GLASS sky projection");
-    private final GlobalSettingsUniform globals = new GlobalSettingsUniform();
     private ClientLevel projectionLevel;
     private SectionRenderDispatcher dispatcher;
-    private SectionUpdateTracker sectionUpdates;
     private ChunkPos gridCenter;
-    private IrisCompatibility.ShaderTerrain shaderTerrain;
-
-    public GameRenderState renderState() {
-        return state;
-    }
-
-    public ClientLevel projectionLevel() {
-        return projectionLevel;
-    }
-
-    public IrisCompatibility.ShaderTerrain shaderTerrain(Object shaderPack) {
-        if (shaderTerrain == null) {
-            shaderTerrain = IrisCompatibility.createShaderTerrain(this, projectionLevel, renderDistance, shaderPack);
-        } else if (shaderTerrain.shaderPack() != shaderPack) {
-            shaderTerrain.close();
-            shaderTerrain = IrisCompatibility.createShaderTerrain(this, projectionLevel, renderDistance, shaderPack);
-        }
-        return shaderTerrain;
-    }
+    private Vec3 lastSortCamera = Vec3.ZERO;
 
     public ProjectionLevelRenderer(Minecraft minecraft, RenderBuffers buffers, int renderDistance) {
-        super(minecraft.getEntityRenderDispatcher(), minecraft.getBlockEntityRenderDispatcher(), minecraft.getModelManager(),
-                minecraft.getTextureManager(), minecraft.getAtlasManager(), minecraft.getShaderManager(), minecraft.gameRenderer, 1, 1);
+        super(minecraft, minecraft.getEntityRenderDispatcher(), minecraft.getBlockEntityRenderDispatcher(), buffers);
         this.minecraft = minecraft;
         this.buffers = buffers;
         this.renderDistance = renderDistance;
-        this.features = new FeatureRenderDispatcher(buffers, minecraft.getModelManager(), minecraft.getAtlasManager(), minecraft.font, state);
-        ProjectionRendererAccessor access = (ProjectionRendererAccessor) this;
-        access.glass$renderBuffers(buffers);
-        access.glass$featureRenderDispatcher(features);
-        access.glass$levelRenderState(state.levelRenderState);
-        access.glass$optionsRenderState(state.optionsRenderState);
-        access.glass$skyRenderer(new SkyRenderer(minecraft.getTextureManager(), minecraft.getAtlasManager(), new ProjectionSkyTarget()));
     }
 
-    public void setLevel(ClientLevel level) {
-        if (shaderTerrain != null) {
-            shaderTerrain.close();
-            shaderTerrain = null;
+    public int renderDistance() {
+        return renderDistance;
+    }
+
+    @Override
+    public void setLevel(@Nullable ClientLevel level) {
+        LevelRendererBufferAccessor accessor = (LevelRendererBufferAccessor) this;
+        ViewArea area = accessor.glass$getViewArea();
+        if (area != null) {
+            area.releaseAllBuffers();
+            accessor.glass$setViewArea(null);
         }
-        resetLevelRenderData();
-        dispatcher = null;
-        sectionUpdates = null;
-        projectionLevel = level;
+        if (dispatcher != null) {
+            dispatcher.dispose();
+            dispatcher = null;
+        }
+        accessor.glass$getVisibleSections().clear();
+        synchronized (accessor.glass$getGlobalBlockEntities()) {
+            accessor.glass$getGlobalBlockEntities().clear();
+        }
         gridCenter = null;
+        lastSortCamera = Vec3.ZERO;
+        projectionLevel = level;
+        accessor.glass$setLevel(level);
         if (level != null) {
             allChanged();
         }
     }
 
+    @Override
     public void allChanged() {
         if (projectionLevel == null) {
             return;
         }
         LevelRendererBufferAccessor accessor = (LevelRendererBufferAccessor) this;
-        if (viewArea() != null) {
-            viewArea().releaseAllBuffers();
+        ViewArea previous = accessor.glass$getViewArea();
+        if (previous != null) {
+            previous.releaseAllBuffers();
         }
-        projectionLevel.clearTintCaches();
-        var models = minecraft.getModelManager();
-        SectionCompiler compiler = new SectionCompiler(minecraft.options.ambientOcclusion().get(),
-                minecraft.options.cutoutLeaves().get(), models.getBlockStateModelSet(), models.getFluidStateModelSet(),
-                minecraft.getBlockColors());
         if (dispatcher == null) {
-            dispatcher = new SectionRenderDispatcher(Util.backgroundExecutor(), buffers, compiler, section -> {
-            });
-            accessor.glass$setSectionRenderDispatcher(dispatcher);
+            dispatcher = new SectionRenderDispatcher(projectionLevel, this, Util.backgroundExecutor(), buffers,
+                    minecraft.getBlockRenderer(), minecraft.getBlockEntityRenderDispatcher());
         } else {
-            dispatcher.clearCompileQueue();
-            dispatcher.setCompiler(compiler);
+            dispatcher.blockUntilClear();
         }
-        clearVisibleSections();
-        accessor.glass$setViewArea(new ViewArea(dispatcher, projectionLevel.getMinY(), projectionLevel.getMaxY(),
-                projectionLevel.getMinSectionY(), projectionLevel.getMaxSectionY(), renderDistance, sectionOcclusionGraph()));
-        sectionUpdates = new SectionUpdateTracker(projectionLevel, renderDistance);
+        ItemBlockRenderTypes.setFancy(Minecraft.useFancyGraphics());
+        accessor.glass$getVisibleSections().clear();
+        synchronized (accessor.glass$getGlobalBlockEntities()) {
+            accessor.glass$getGlobalBlockEntities().clear();
+        }
+        accessor.glass$setViewArea(new ViewArea(dispatcher, projectionLevel, renderDistance, this));
         gridCenter = null;
+        lastSortCamera = Vec3.ZERO;
+        needsUpdate();
     }
 
     public void prepareCamera(ProjectionCamera camera, ChunkPos center) {
         if (!center.equals(gridCenter)) {
-            SectionPos cameraSection = SectionPos.of(center.x(), SectionPos.blockToSectionCoord(camera.position().y), center.z());
-            viewArea().repositionCamera(cameraSection);
-            sectionUpdates.repositionCamera(cameraSection);
+            ((LevelRendererBufferAccessor) this).glass$getViewArea()
+                    .repositionCamera(center.getMiddleBlockX(), center.getMiddleBlockZ());
             gridCenter = center;
         }
-        dispatcher.setCameraPosition(camera.position());
+        dispatcher.setCamera(camera.getPosition());
     }
 
-    public void setSectionDirty(int sectionX, int sectionY, int sectionZ) {
-        if (shaderTerrain != null) {
-            shaderTerrain.dirty(sectionX, sectionY, sectionZ);
+    public void renderTerrainLayer(RenderType layer, Vec3 camera, Matrix4f modelView, Matrix4f projection) {
+        RenderSystem.assertOnRenderThread();
+        if (layer == RenderType.translucent() && !ProjectionRenderManager.usesSharedTerrain(this)) {
+            sortTransparency(camera);
         }
-        if (sectionUpdates != null) {
-            sectionUpdates.setDirty(sectionX, sectionY, sectionZ, false);
-        }
-    }
-
-    public boolean isSectionDirty(SectionRenderDispatcher.RenderSection section) {
-        SectionUpdateTracker.SectionDirtyState dirtyState = sectionUpdates == null ? null : sectionUpdates.getDirtyState(section.getSectionNode());
-        return dirtyState != null && dirtyState.isDirty();
-    }
-
-    public boolean hasAllNeighbors(SectionRenderDispatcher.RenderSection section) {
-        return sectionUpdates != null && sectionUpdates.hasAllNeighbors(projectionLevel, section.getSectionNode());
-    }
-
-    public void compileSection(SectionRenderDispatcher.RenderSection section, RenderRegionCache regions) {
-        SectionUpdateTracker.SectionDirtyState dirtyState = sectionUpdates.getDirtyState(section.getSectionNode());
-        if (dirtyState != null) {
-            dirtyState.setNotDirty();
-        }
-        section.compileAsync(regions.createRegion(projectionLevel, section.getSectionNode()));
-    }
-
-    private FogRenderer nextFog(long frame) {
-        if (frame != fogFrame) {
-            fogFrame = frame;
-            fogUses = 0;
-        }
-        if (fogUses == fogs.size()) {
-            fogs.add(new FogRenderer());
-        }
-        return fogs.get(fogUses++);
-    }
-
-    public void renderScene(ProjectionCamera camera, Matrix4f projection, Matrix4f skyProjection, DeltaTracker deltaTracker,
-                            long frame, IrisCompatibility.ShaderView shaderView) {
-        var savedProjection = RenderSystem.getProjectionMatrixBuffer();
-        var savedFog = RenderSystem.getShaderFog();
-        var savedGlobals = RenderSystem.getGlobalSettingsUniform();
-        FogRenderer fog = nextFog(frame);
-        var options = state.optionsRenderState;
-        var mainOptions = minecraft.gameRenderer.gameRenderState().optionsRenderState;
-        options.cloudStatus = mainOptions.cloudStatus;
-        options.cloudRange = mainOptions.cloudRange;
-        options.renderDistance = renderDistance;
-        options.ambientOcclusion = mainOptions.ambientOcclusion;
-        options.cutoutLeaves = mainOptions.cutoutLeaves;
-        options.textureFiltering = mainOptions.textureFiltering;
-        options.maxAnisotropyValue = mainOptions.maxAnisotropyValue;
-        options.improvedTransparency = false;
-        options.cameraType = mainOptions.cameraType;
-        options.glintSpeed = mainOptions.glintSpeed;
-        options.glintStrength = mainOptions.glintStrength;
-        options.textBackgroundOpacity = mainOptions.textBackgroundOpacity;
-        options.backgroundForChatOnly = mainOptions.backgroundForChatOnly;
-        options.fov = mainOptions.fov;
-        var cameraState = state.levelRenderState.cameraRenderState;
-        float partialTick = deltaTracker.getGameTimeDeltaPartialTick(false);
-        camera.extractRenderState(cameraState, partialTick);
-        cameraState.projectionMatrix.set(projection);
-        cameraState.viewRotationMatrix.set(camera.getViewRotationMatrix(new Matrix4f()));
-        cameraState.cullFrustum.set(camera.getCullFrustum());
-        cameraState.initialized = true;
-        cameraState.depthFar = renderDistance * 64.0F;
-        cameraState.fogData = fog.setupFog(camera, renderDistance, deltaTracker, 0.0F, projectionLevel);
-        state.levelRenderState.reset();
-        try {
-            fog.updateBuffer(cameraState.fogData);
-            GpuBufferSlice sceneProjection = projectionBuffer.getBuffer(projection);
-            GpuBufferSlice unclippedProjection = skyProjectionBuffer.getBuffer(skyProjection);
-            RenderSystem.setProjectionMatrix(sceneProjection, ProjectionType.PERSPECTIVE);
-            var target = minecraft.gameRenderer.mainRenderTarget();
-            globals.update(target.width, target.height, mainOptions.glintStrength, projectionLevel.getGameTime(),
-                    deltaTracker, 0, camera.position(), false);
-            Runnable render = () -> {
-                extractLevel(deltaTracker, camera, partialTick);
-                renderProjectionLevel(fog, deltaTracker, sceneProjection, unclippedProjection);
-            };
-            if (shaderView == null) {
-                render.run();
-            } else {
-                shaderView.render(this, camera, projection, deltaTracker, render);
-            }
-        } finally {
-            buffers.endFrame();
-            endFrame();
-            fog.endFrame();
-            RenderSystem.setProjectionMatrix(savedProjection, ProjectionType.PERSPECTIVE);
-            RenderSystem.setShaderFog(savedFog);
-            RenderSystem.setGlobalSettingsUniform(savedGlobals);
-            Camera mainCamera = minecraft.gameRenderer.mainCamera();
-            entityRenderDispatcher().prepare(mainCamera, minecraft.crosshairPickEntity);
-            blockEntityRenderDispatcher().prepare(mainCamera.position());
-        }
-    }
-
-    private void extractLevel(DeltaTracker deltaTracker, ProjectionCamera camera, float partialTick) {
-        var levelState = state.levelRenderState;
-        Vec3 cameraPos = camera.position();
-        Frustum cullFrustum = camera.getCullFrustum();
-        blockEntityRenderDispatcher().prepare(cameraPos);
-        entityRenderDispatcher().prepare(camera, minecraft.crosshairPickEntity);
-        levelState.gameTime = projectionLevel.getGameTime();
-        extractProjectionEntities(camera, cullFrustum, deltaTracker, levelState);
-        extractProjectionBlockEntities(partialTick, levelState);
-        extractBlockDestroyAnimation(cameraPos, levelState);
-        weatherEffectRenderer().extractRenderState(projectionLevel, partialTick, cameraPos, levelState.weatherRenderState);
-        SkyRenderer sky = skyRenderer();
-        if (sky != null) {
-            sky.extractRenderState(projectionLevel, partialTick, camera, levelState.skyRenderState);
-        }
-        worldBorderRenderer().extract(projectionLevel.getWorldBorder(), partialTick, cameraPos, renderDistance * 16,
-                levelState.worldBorderRenderState);
-        levelState.cloudColor = camera.attributeProbe().getValue(EnvironmentAttributes.CLOUD_COLOR, partialTick);
-        if (ARGB.alpha(levelState.cloudColor) > 0) {
-            levelState.cloudHeight = camera.attributeProbe().getValue(EnvironmentAttributes.CLOUD_HEIGHT, partialTick);
-        }
-    }
-
-    private void extractProjectionEntities(Camera camera, Frustum frustum, DeltaTracker deltaTracker, LevelRenderState levelState) {
-        Vec3 cameraPos = camera.position();
-        var tickRateManager = projectionLevel.tickRateManager();
-        for (Entity entity : projectionLevel.entitiesForRendering()) {
-            if (!entityRenderDispatcher().shouldRender(entity, frustum, cameraPos.x, cameraPos.y, cameraPos.z)) {
-                continue;
-            }
-            BlockPos blockPos = entity.blockPosition();
-            if (!projectionLevel.isOutsideBuildHeight(blockPos.getY()) && !isSectionCompiledAndVisible(blockPos)) {
-                continue;
-            }
-            if (entity == camera.entity() && !camera.isDetached()
-                    && !(camera.entity() instanceof LivingEntity living && living.isSleeping())) {
-                continue;
-            }
-            if (entity instanceof LocalPlayer && camera.entity() != entity) {
-                continue;
-            }
-            if (entity.tickCount == 0) {
-                entity.xOld = entity.getX();
-                entity.yOld = entity.getY();
-                entity.zOld = entity.getZ();
-            }
-            float partialEntity = deltaTracker.getGameTimeDeltaPartialTick(!tickRateManager.isEntityFrozen(entity));
-            levelState.entityRenderStates.add(entityRenderDispatcher().extractEntity(entity, partialEntity));
-        }
-        levelState.lastEntityRenderStateCount = levelState.entityRenderStates.size();
-    }
-
-    private void extractProjectionBlockEntities(float partialTick, LevelRenderState levelState) {
-        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
-            shaderTerrain.extractBlockEntities(partialTick, levelState);
+        layer.setupRenderState();
+        ShaderInstance shader = RenderSystem.getShader();
+        if (shader == null) {
+            layer.clearRenderState();
             return;
         }
-        var dispatcher = blockEntityRenderDispatcher();
-        var hidden = ProjectionRenderContext.hiddenTerrainBlock();
-        for (var section : visibleSections()) {
-            for (BlockEntity entity : section.getSectionMesh().getRenderableBlockEntities()) {
-                if (!entity.getBlockPos().equals(hidden)) {
-                    var entityState = dispatcher.tryExtractRenderState(entity, partialTick, null, false);
-                    if (entityState != null) {
-                        levelState.blockEntityRenderStates.add(entityState);
-                    }
-                }
-            }
-        }
-        for (BlockEntity entity : projectionLevel.getGloballyRenderedBlockEntities()) {
-            if (!entity.isRemoved() && !entity.getBlockPos().equals(hidden)) {
-                var entityState = dispatcher.tryExtractRenderState(entity, partialTick, null, true);
-                if (entityState != null) {
-                    levelState.blockEntityRenderStates.add(entityState);
-                }
-            }
-        }
-    }
-
-    private void extractBlockDestroyAnimation(Vec3 cameraPos, LevelRenderState levelState) {
-        for (var entry : projectionLevel.destructionProgress().long2ObjectEntrySet()) {
-            BlockPos pos = BlockPos.of(entry.getLongKey());
-            SortedSet<BlockDestructionProgress> progresses = entry.getValue();
-            if (pos.distToCenterSqr(cameraPos.x, cameraPos.y, cameraPos.z) <= 1024.0 && progresses != null && !progresses.isEmpty()) {
-                levelState.blockBreakingRenderStates.add(new BlockBreakingRenderState(pos, projectionLevel.getBlockState(pos),
-                        progresses.last().getProgress()));
-            }
-        }
-    }
-
-    private void renderProjectionLevel(FogRenderer fog, DeltaTracker delta, GpuBufferSlice sceneProjection, GpuBufferSlice skyProjection) {
-        var access = (ProjectionRendererAccessor) this;
-        var targets = access.glass$targets();
-        var levelState = state.levelRenderState;
-        var camera = levelState.cameraRenderState;
-        var terrainFog = fog.getBuffer(FogRenderer.FogMode.WORLD);
-        var modelView = RenderSystem.getModelViewStack();
-        modelView.pushMatrix();
-        FeatureRenderDispatcher.PreparedFrame featureFrame = null;
+        Uniform offset = shader.CHUNK_OFFSET;
         try {
-            modelView.mul(camera.viewRotationMatrix);
-            LevelRenderContexts.prepare(this, levelState, access.glass$submitNodeStorage());
-            access.glass$submitFeatures(levelState, access.glass$submitNodeStorage(), false);
-            featureFrame = features.prepareFrame(access.glass$submitNodeStorage());
-            var frame = new FrameGraphBuilder();
-            var target = minecraft.gameRenderer.mainRenderTarget();
-            targets.main = frame.importExternal("main", target);
-            var clear = frame.addPass("clear");
-            targets.main = clear.readsAndWrites(targets.main);
-            clear.executes(() -> {
-                RenderSystem.getDevice().createCommandEncoder().clearColorAndDepthTextures(
-                    target.getColorTexture(), new Vector4f(camera.fogData.color.x, camera.fogData.color.y,
-                            camera.fogData.color.z, 1.0F), target.getDepthTexture(), 0.0);
-                IrisCompatibility.beginClear();
-            });
-            useProjection(frame, targets, "glass_sky_projection", skyProjection);
-            access.glass$skyPass(frame, camera, terrainFog);
-            useProjection(frame, targets, "glass_scene_projection", sceneProjection);
-            ChunkSectionsToRender chunks = prepareChunkRenders(camera.viewRotationMatrix);
-            LevelRenderContexts.setSectionsToRender(this, chunks);
-            access.glass$mainPass(frame, featureFrame, terrainFog, levelState, Profiler.get(), chunks);
-            if (state.optionsRenderState.cloudStatus != CloudStatus.OFF && ARGB.alpha(levelState.cloudColor) > 0) {
-                access.glass$cloudsPass(frame, state.optionsRenderState.cloudStatus, camera.pos, levelState.gameTime,
-                        delta.getGameTimeDeltaPartialTick(false), levelState.cloudColor, levelState.cloudHeight,
-                        state.optionsRenderState.cloudRange);
+            shader.setDefaultUniforms(VertexFormat.Mode.QUADS, modelView, projection, minecraft.getWindow());
+            shader.apply();
+            var sections = ((LevelRendererBufferAccessor) this).glass$getVisibleSections();
+            boolean translucent = layer == RenderType.translucent();
+            for (int i = 0; i < sections.size(); i++) {
+                SectionRenderDispatcher.RenderSection section = sections.get(translucent ? sections.size() - 1 - i : i);
+                if (section.getCompiled().isEmpty(layer)) {
+                    continue;
+                }
+                BlockPos origin = section.getOrigin();
+                if (offset != null) {
+                    offset.set((float) (origin.getX() - camera.x), (float) (origin.getY() - camera.y),
+                            (float) (origin.getZ() - camera.z));
+                    offset.upload();
+                }
+                VertexBuffer buffer = section.getBuffer(layer);
+                buffer.bind();
+                buffer.draw();
             }
-            access.glass$weatherPass(frame, terrainFog);
-            IrisCompatibility.renderWithPipeline(this, () -> frame.execute(GraphicsResourceAllocator.UNPOOLED));
+            if (offset != null) {
+                offset.set(0.0F, 0.0F, 0.0F);
+            }
+            SableRenderCompatibility.renderSectionLayer(projectionLevel, layer, shader, camera, modelView, projection,
+                    minecraft.getTimer().getGameTimeDeltaPartialTick(false));
         } finally {
-            targets.clear();
-            if (featureFrame != null) {
-                featureFrame.close();
+            if (offset != null) {
+                offset.set(0.0F, 0.0F, 0.0F);
             }
-            modelView.popMatrix();
-            levelState.reset();
+            shader.clear();
+            VertexBuffer.unbind();
+            layer.clearRenderState();
         }
     }
 
-    private static void useProjection(FrameGraphBuilder frame, LevelTargetBundle targets, String name, GpuBufferSlice projection) {
-        var pass = frame.addPass(name);
-        targets.main = pass.readsAndWrites(targets.main);
-        pass.executes(() -> RenderSystem.setProjectionMatrix(projection, ProjectionType.PERSPECTIVE));
+    private void sortTransparency(Vec3 camera) {
+        if (camera.distanceToSqr(lastSortCamera) <= 1.0D) {
+            return;
+        }
+        SectionPos sectionPos = SectionPos.of(BlockPos.containing(camera));
+        boolean changedSection = !sectionPos.equals(SectionPos.of(BlockPos.containing(lastSortCamera)));
+        lastSortCamera = camera;
+        int sorted = 0;
+        for (SectionRenderDispatcher.RenderSection section : ((LevelRendererBufferAccessor) this).glass$getVisibleSections()) {
+            if ((changedSection || section.isAxisAlignedWith(sectionPos.x(), sectionPos.y(), sectionPos.z()))
+                    && section.resortTransparency(RenderType.translucent(), dispatcher) && ++sorted >= 15) {
+                break;
+            }
+        }
     }
 
     @Override
-    public ChunkSectionsToRender prepareChunkRenders(Matrix4fc modelViewMatrix) {
-        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
-            return shaderTerrain.prepareChunkRenders(modelViewMatrix);
-        }
-        EnumMap<ChunkSectionLayer, Int2ObjectOpenHashMap<List<RenderPass.Draw<GpuBufferSlice[]>>>> drawGroups = new EnumMap<>(ChunkSectionLayer.class);
-        int largestIndexCount = 0;
-        for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
-            drawGroups.put(layer, new Int2ObjectOpenHashMap<>());
-        }
-        List<DynamicUniforms.ChunkSectionInfo> sectionInfos = new ArrayList<>();
-        GpuTextureView blockAtlas = minecraft.getTextureManager().getTexture(TextureAtlas.LOCATION_BLOCKS).getTextureView();
-        int textureAtlasWidth = blockAtlas.getWidth(0);
-        int textureAtlasHeight = blockAtlas.getHeight(0);
-        if (dispatcher != null) {
-            dispatcher.lock();
-            try {
-                long now = Util.getMillis();
-                for (SectionRenderDispatcher.RenderSection section : visibleSections()) {
-                    SectionMesh sectionMesh = section.getSectionMesh();
-                    BlockPos renderOffset = section.getRenderOrigin();
-                    int uboIndex = -1;
-                    for (ChunkSectionLayer layer : ChunkSectionLayer.values()) {
-                        SectionMesh.SectionDraw draw = sectionMesh.getSectionDraw(layer);
-                        SectionRenderDispatcher.RenderSectionBufferSlice slice = dispatcher.getRenderSectionSlice(sectionMesh, layer);
-                        if (slice == null || draw == null || draw.hasCustomIndexBuffer() && slice.indexBuffer() == null) {
-                            continue;
-                        }
-                        if (uboIndex == -1) {
-                            uboIndex = sectionInfos.size();
-                            sectionInfos.add(new DynamicUniforms.ChunkSectionInfo(new Matrix4f(modelViewMatrix), renderOffset.getX(),
-                                    renderOffset.getY(), renderOffset.getZ(), section.getVisibility(now), textureAtlasWidth, textureAtlasHeight));
-                        }
-                        int combinedHash = 173;
-                        VertexFormat vertexFormat = layer.pipeline().getVertexFormatBinding(0);
-                        GpuBuffer vertexBuffer = slice.vertexBuffer();
-                        if (layer != ChunkSectionLayer.TRANSLUCENT) {
-                            combinedHash = 31 * combinedHash + vertexBuffer.hashCode();
-                        }
-                        int firstIndex = 0;
-                        GpuBuffer indexBuffer = null;
-                        IndexType indexType = null;
-                        if (!draw.hasCustomIndexBuffer()) {
-                            largestIndexCount = Math.max(largestIndexCount, draw.indexCount());
-                        } else {
-                            indexBuffer = slice.indexBuffer();
-                            indexType = draw.indexType();
-                            if (layer != ChunkSectionLayer.TRANSLUCENT) {
-                                combinedHash = 31 * combinedHash + indexBuffer.hashCode();
-                                combinedHash = 31 * combinedHash + indexType.hashCode();
-                            }
-                            firstIndex = (int) (slice.indexBufferOffset() / indexType.bytes);
-                        }
-                        int finalUboIndex = uboIndex;
-                        int baseVertex = (int) (slice.vertexBufferOffset() / vertexFormat.getVertexSize());
-                        drawGroups.get(layer).computeIfAbsent(combinedHash, ignored -> new ArrayList<>()).add(new RenderPass.Draw<>(
-                                0, vertexBuffer, indexBuffer, indexType, firstIndex, draw.indexCount(), baseVertex,
-                                (sectionUbos, uploader) -> uploader.upload("ChunkSection", sectionUbos[finalUboIndex])));
-                    }
-                }
-            } finally {
-                dispatcher.unlock();
-            }
-        }
-        GpuBufferSlice[] chunkSectionInfos = RenderSystem.getDynamicUniforms().writeChunkSections(sectionInfos.toArray(new DynamicUniforms.ChunkSectionInfo[0]));
-        return new ChunkSectionsToRender(blockAtlas, drawGroups, largestIndexCount, chunkSectionInfos);
+    public SectionRenderDispatcher getSectionRenderDispatcher() {
+        return dispatcher;
     }
 
     @Override
@@ -487,40 +177,46 @@ public class ProjectionLevelRenderer extends LevelRenderer {
         return dispatcher == null || dispatcher.isQueueEmpty();
     }
 
-    public String sectionStatistics() {
-        ViewArea area = viewArea();
-        if (area == null) {
-            return null;
-        }
-        int rendered = 0;
-        for (var section : visibleSections()) {
-            if (section.getSectionMesh().hasRenderableLayers()) {
-                rendered++;
+    @Override
+    public int countRenderedSections() {
+        return (int) ((LevelRendererBufferAccessor) this).glass$getVisibleSections().stream()
+                .filter(section -> !section.getCompiled().hasNoRenderableLayers()).count();
+    }
+
+    @Override
+    public String getSectionStatistics() {
+        return dispatcher == null ? "none" : dispatcher.getStats();
+    }
+
+    @Override
+    public boolean isSectionCompiled(BlockPos pos) {
+        SectionRenderDispatcher.RenderSection section = ProjectionSections.find(this,
+                SectionPos.blockToSectionCoord(pos.getX()), SectionPos.blockToSectionCoord(pos.getY()),
+                SectionPos.blockToSectionCoord(pos.getZ()));
+        return section != null && section.getCompiled() != SectionRenderDispatcher.CompiledSection.UNCOMPILED;
+    }
+
+    @Override
+    public void setSectionDirty(int x, int y, int z) {
+        ProjectionSections.markDirty(this, x, y, z);
+    }
+
+    @Override
+    public void setSectionDirtyWithNeighbors(int x, int y, int z) {
+        for (int dx = -1; dx <= 1; dx++) {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    setSectionDirty(x + dx, y + dy, z + dz);
+                }
             }
         }
-        return String.format(Locale.ROOT, "C: %d/%d D: %d, %s", rendered, area.size(), renderDistance,
-                dispatcher == null ? "null" : dispatcher.getStats());
     }
 
     @Override
-    public boolean isSectionCompiledAndVisible(BlockPos pos) {
-        if (IrisCompatibility.shaderView() != null && shaderTerrain != null) {
-            return shaderTerrain.isSectionReady(pos);
-        }
-        var section = ProjectionSections.find(this, SectionPos.blockToSectionCoord(pos.getX()),
-                SectionPos.blockToSectionCoord(pos.getY()), SectionPos.blockToSectionCoord(pos.getZ()));
-        return section != null && section.getSectionMesh() != net.minecraft.client.renderer.chunk.CompiledSectionMesh.UNCOMPILED;
+    public void onChunkLoaded(ChunkPos pos) {
     }
 
     @Override
-    public void close() {
-        setLevel(null);
-        super.close();
-        features.close();
-        fogs.forEach(FogRenderer::close);
-        fogs.clear();
-        projectionBuffer.close();
-        skyProjectionBuffer.close();
-        globals.close();
+    public void addRecentlyCompiledSection(SectionRenderDispatcher.RenderSection section) {
     }
 }

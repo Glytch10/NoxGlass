@@ -20,13 +20,13 @@ You will need to craft a few **G.L.A.S.S Projectors** - one projector can cover 
 
 Once you've got all the materials needed, you can start building! Place your **Powerable Glass** down and place your **G.L.A.S.S Projector**. The glowing side of the **G.L.A.S.S Projector** must be flush with the powerable glass in the direction you are projecting to. Once done, right click to open the GUI, select a channel, and give it some redstone power!
 
-
 ![gallery-image](https://cdn.modrinth.com/data/5TABPEIf/images/3ee7b261e1c9948160e91fb5b23ce0c34c71ef28.png)
 
 ## Features
 - You can crossfade multiple channels if the two projectors share the same Powerable Glass. Try it out!
 - Anti-Xray support: The projection will become noisy if you position yourself in a way which noclips your view into blocks/the terrain.
 - **Iris and Sodium** are supported.
+- Create Aero + Sable experimental support for 1.21.1.
 
 ## Credits
 

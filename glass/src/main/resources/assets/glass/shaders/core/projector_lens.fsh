@@ -1,8 +1,12 @@
-#version 330
+#version 150
 
-#moj_import <minecraft:globals.glsl>
+#moj_import <fog.glsl>
 
 uniform sampler2D Sampler0;
+uniform float GameTime;
+uniform float FogStart;
+uniform float FogEnd;
+uniform vec4 FogColor;
 
 in vec2 lensUv;
 in vec2 shimmerUv;
@@ -21,5 +25,5 @@ void main() {
     float brightness = max(shimmer.r, max(shimmer.g, shimmer.b));
     float alpha = mask * (brightness * 0.3 + glow * pulse * 0.16);
     vec3 color = mix(vec3(0.38, 0.16, 0.72), vec3(0.65, 0.44, 0.95), glow * 0.65);
-    fragColor = vec4(color, alpha);
+    fragColor = linear_fog(vec4(color, alpha), vertexDistance, FogStart, FogEnd, FogColor);
 }

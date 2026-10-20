@@ -16,7 +16,8 @@ val catalog = minecraftCatalog
 val minecraftVersion = project.minecraftVersion
 val loader = project.name.substringAfterLast('-')
 val moduleDirectory = requireNotNull(project.parent).layout.projectDirectory
-val javaVersion = providers.gradleProperty("javaVersion").get().toInt()
+val javaVersion = catalog.findVersion("java").map { it.requiredVersion.toInt() }
+    .orElseGet { providers.gradleProperty("javaVersion").get().toInt() }
 val releaseVersion = "${metadata.version}+$minecraftVersion"
 
 group = metadata.required("mod.group")
@@ -75,7 +76,12 @@ val targetMinecraft = when {
     loader == "fabric" -> "=$minecraftVersion"
     else -> "[$minecraftVersion]"
 }
-val yaclVersion = mcLibrary("yacl-$loader").get().versionConstraint.requiredVersion.removeSuffix("-$loader")
+val yaclVersion = catalog.findLibrary("yacl-$loader")
+    .map { it.get().versionConstraint.requiredVersion.removeSuffix("-$loader") }
+    .orElse("")
+val minimumFabricLoader = catalog.findVersion("fabric-loader-minimum")
+    .orElseGet { catalog.findVersion("fabric-loader").get() }
+    .requiredVersion
 val resourceProperties = mapOf(
     "version" to releaseVersion,
     "mod_version" to metadata.version,
@@ -87,9 +93,9 @@ val resourceProperties = mapOf(
     "mod_license" to metadata.required("mod.license"),
     "loader" to loader,
     "fml_loader" to "[4,)",
-    "target_loader" to if (loader == "fabric") catalog.findVersion("fabric-loader").get().requiredVersion
+    "target_loader" to if (loader == "fabric") minimumFabricLoader
         else "[${catalog.findVersion("neoforge").get().requiredVersion},)",
-    "target_fabricloader" to catalog.findVersion("fabric-loader").get().requiredVersion,
+    "target_fabricloader" to minimumFabricLoader,
     "target_architectury" to catalog.findVersion("architectury").map { it.requiredVersion }.orElse(""),
     "target_yacl" to if (loader == "fabric") ">=$yaclVersion" else yaclVersion,
     "target_mru" to if (loader == "fabric") ">=$requiredModVersion" else requiredModVersion
@@ -220,6 +226,14 @@ repositories {
         content {
             includeGroup("mezz.jei")
             includeGroup("net.mezzdev.config")
+        }
+    }
+    maven {
+        name = "RyanHCode Maven"
+        url = uri("https://maven.ryanhcode.dev/releases")
+        content {
+            includeGroup("dev.ryanhcode.sable")
+            includeGroup("dev.ryanhcode.sable-companion")
         }
     }
 }

@@ -1,10 +1,11 @@
 //? if fabric {
 package dev.imb11.platform;
 
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerFactory;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 
-public interface ExtendedMenuProvider<T> extends net.fabricmc.fabric.api.menu.v1.ExtendedMenuProvider<T> {
+public interface ExtendedMenuProvider<T> extends ExtendedScreenHandlerFactory<T> {
     StreamCodec<? super RegistryFriendlyByteBuf, T> getScreenOpeningCodec();
 }
 //?} else {

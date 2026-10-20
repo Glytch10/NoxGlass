@@ -28,40 +28,39 @@ const propertiesPath = `${project}/mod.properties`;
 const properties = readFileSync(propertiesPath, 'utf8');
 const current = properties.match(/^mod\.version=(.+)$/m)?.[1].trim();
 if (!current) throw new Error('Missing mod.version');
-const currentCore = current.split(/[+-]/)[0].split('.').map(Number);
-const nextCore = version.split(/[+-]/)[0].split('.').map(Number);
-const difference = nextCore.map((value, index) => value - currentCore[index]).find(value => value !== 0);
-if (current === version || difference < 0) throw new Error(`Version must advance from ${current}`);
-if (!difference) {
-  const previousPre = current.split('+')[0].split('-').slice(1).join('-');
-  const nextPre = version.split('+')[0].split('-').slice(1).join('-');
-  const comparePre = (left, right) => {
-    const a = left.split('.');
-    const b = right.split('.');
-    for (let index = 0; index < Math.max(a.length, b.length); index++) {
-      if (a[index] === undefined) return -1;
-      if (b[index] === undefined) return 1;
-      if (a[index] === b[index]) continue;
-      const numericA = /^\d+$/.test(a[index]);
-      const numericB = /^\d+$/.test(b[index]);
-      if (numericA && numericB) return BigInt(a[index]) > BigInt(b[index]) ? 1 : -1;
-      if (numericA !== numericB) return numericA ? -1 : 1;
-      return a[index] > b[index] ? 1 : -1;
-    }
-    return 0;
-  };
-  if (!previousPre || (nextPre && comparePre(nextPre, previousPre) <= 0)) throw new Error(`Version must advance from ${current}`);
-}
+if (current === version) throw new Error(`Version must differ from ${current}`);
 const remote = git('remote', 'get-url', 'origin');
 const repository = process.env.GITHUB_REPOSITORY ?? remote.match(/github\.com[:/](.+?)(?:\.git)?$/)?.[1];
 if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error('Cannot determine GitHub repository');
 const api = endpoint => JSON.parse(run('gh', ['api', '--paginate', '--slurp', `repos/${repository}/${endpoint}`])).flat();
 const commits = new Set(git('rev-list', `${baseline}..${head}`).split('\n'));
-const pulls = api('pulls?state=closed&base=main&per_page=100')
+const pulls = api('pulls?state=closed&base=glass%2F1.21.1&per_page=100')
   .filter(pr => pr.merged_at && commits.has(pr.merge_commit_sha) && pr.labels.some(label => label.name === `project:${project}`))
   .sort((a, b) => a.merged_at.localeCompare(b.merged_at) || a.number - b.number);
 const categories = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security'];
 const sections = new Map(categories.map(category => [category, []]));
+const changelogPath = `${project}/CHANGELOG.md`;
+const changelog = readFileSync(changelogPath, 'utf8').replace(/\r\n/g, '\n');
+if (!changelog.startsWith('# Changelog\n')) throw new Error('Expected # Changelog heading');
+if (changelog.split('\n').some(line => line.startsWith(`## [${version}]`))) throw new Error('Changelog already contains this version');
+const history = changelog.slice('# Changelog'.length).trimStart();
+const unreleasedHeading = history.match(/^## (?:\[Unreleased\]|Unreleased)\s*\n/);
+const unreleasedBody = unreleasedHeading ? history.slice(unreleasedHeading[0].length).split(/^(?=## )/m)[0] : '';
+const released = unreleasedHeading ? history.slice(unreleasedHeading[0].length + unreleasedBody.length) : history;
+let unreleasedCategory;
+for (const line of unreleasedBody.split('\n')) {
+  if (!line.trim()) continue;
+  const heading = line.match(/^### (\w+)\s*$/);
+  if (heading) {
+    unreleasedCategory = heading[1];
+    if (!sections.has(unreleasedCategory)) throw new Error(`Unreleased: unknown category ${unreleasedCategory}`);
+  } else if (unreleasedCategory && /^- \S/.test(line)) {
+    sections.get(unreleasedCategory).push(line);
+  } else if (unreleasedCategory && /^ {2,}\S/.test(line) && sections.get(unreleasedCategory).length) {
+    const values = sections.get(unreleasedCategory);
+    values[values.length - 1] += `\n${line}`;
+  } else throw new Error('Unreleased: use ### category headings and Markdown bullet entries');
+}
 for (const pr of pulls) {
   const comments = api(`issues/${pr.number}/comments?per_page=100`);
   const marker = `[release-changelog-${project}]: #`;
@@ -89,15 +88,8 @@ for (const pr of pulls) {
   if (!entries) throw new Error(`PR #${pr.number}: empty changelog`);
 }
 const notes = [...sections].filter(([, entries]) => entries.length).map(([category, entries]) => `### ${category}\n\n${entries.join('\n')}`).join('\n\n') || 'No changelog provided.';
-const changelogPath = `${project}/CHANGELOG.md`;
-const changelog = readFileSync(changelogPath, 'utf8').replace(/\r\n/g, '\n');
-if (!changelog.startsWith('# Changelog\n')) throw new Error('Expected # Changelog heading');
-if (changelog.split('\n').some(line => line.startsWith(`## [${version}]`))) throw new Error('Changelog already contains this version');
-const history = changelog.slice('# Changelog'.length).trimStart();
-const withoutEmptyUnreleased = history.replace(/^## (?:\[Unreleased\]|Unreleased)\s*\n(?=## )/, '');
-if (/^## (?:\[Unreleased\]|Unreleased)/.test(withoutEmptyUnreleased)) throw new Error('Move existing Unreleased notes into PR comments before preparing a release');
 const date = new Date().toISOString().slice(0, 10);
-const updated = `# Changelog\n\n## [${version}] - ${date}\n\n${notes}\n\n${withoutEmptyUnreleased}`;
+const updated = `# Changelog\n\n## [${version}] - ${date}\n\n${notes}\n\n${released}`;
 console.log(`${project}: ${current} -> ${version}\nBase: ${base}\nCommit: ${head}\nPRs: ${pulls.map(pr => `#${pr.number}`).join(', ')}\n\n${notes}\n`);
 if (args.includes('--write')) {
   writeFileSync(propertiesPath, properties.replace(/^mod\.version=.*$/m, `mod.version=${version}`));

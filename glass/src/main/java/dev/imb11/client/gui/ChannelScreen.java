@@ -1,19 +1,20 @@
 package dev.imb11.client.gui;
 
+import dev.imb11.client.ClientSourcePoses;
 import dev.imb11.client.ClientProjectionSourceRegistry;
+import com.mojang.blaze3d.systems.RenderSystem;
 import dev.imb11.client.renderer.projection.ProjectionRenderManager;
 import dev.imb11.platform.ClientNetworking;
 import dev.imb11.sync.Channel;
 import dev.imb11.sync.ChannelManagerPersistence;
 import dev.imb11.sync.packets.C2SCreateChannelPacket;
 import dev.imb11.sync.packets.C2SDeleteChannelPacket;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.player.Inventory;
 
@@ -43,8 +44,6 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     private int detailX;
     private int detailWidth;
     private int matches;
-    private int panelWidth;
-    private int panelHeight;
 
     protected ChannelScreen(M menu, Inventory inventory, Component title, boolean manage) {
         super(menu, inventory, title);
@@ -69,15 +68,13 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     @Override
     protected void init() {
         String query = search == null ? "" : search.getValue();
-        double scroll = list == null ? 0 : list.scrollAmount();
-        panelWidth = Math.min(620, width - 16);
-        panelHeight = Math.min(340, height - 16);
+        double scroll = list == null ? 0 : list.getScrollAmount();
+        imageWidth = Math.min(620, width - 16);
+        imageHeight = Math.min(340, height - 16);
         super.init();
-        leftPos = (width - panelWidth) / 2;
-        topPos = (height - panelHeight) / 2;
-        listWidth = Math.max(112, panelWidth * 35 / 100);
+        listWidth = Math.max(112, imageWidth * 35 / 100);
         detailX = leftPos + listWidth + 12;
-        detailWidth = panelWidth - listWidth - 24;
+        detailWidth = imageWidth - listWidth - 24;
         refreshChannels();
         if (!initialized) {
             Channel current = current();
@@ -88,14 +85,14 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         search.setMaxLength(ChannelManagerPersistence.MAX_CHANNEL_NAME_LENGTH);
         search.setHint(Component.literal(manage ? "Search or create…" : "Search…"));
         search.setValue(query);
-        list = addRenderableWidget(new ChannelList(leftPos + 6, topPos + 76, listWidth - 8, panelHeight - 84));
+        list = addRenderableWidget(new ChannelList(leftPos + 6, topPos + 76, listWidth - 8, imageHeight - 84));
         search.setResponder(value -> {
             confirmingDelete = false;
             rebuildList();
             list.setScrollAmount(0);
             updateActions();
         });
-        int actionY = topPos + panelHeight - 30;
+        int actionY = topPos + imageHeight - 30;
         int deleteWidth = manage ? Math.min(64, detailWidth / 3) : 0;
         int chooseWidth = manage ? detailWidth - deleteWidth - 6 : detailWidth;
         choose = addRenderableWidget(Button.builder(chooseLabel(), button -> {
@@ -106,7 +103,7 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         }).bounds(detailX, actionY, chooseWidth, 20).build());
         if (manage) {
             unlink = addRenderableWidget(Button.builder(Component.literal("Unlink"), button -> unlink())
-                    .bounds(leftPos + panelWidth - 66, topPos + 6, 56, 20).build());
+                    .bounds(leftPos + imageWidth - 66, topPos + 6, 56, 20).build());
             cancel = addRenderableWidget(Button.builder(Component.literal("Cancel"), button -> {
                 confirmingDelete = false;
                 updateActions();
@@ -176,7 +173,7 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     }
 
     private void rebuildList() {
-        double scroll = list.scrollAmount();
+        double scroll = list.getScrollAmount();
         list.clearRows();
         String query = search.getValue().strip().toLowerCase(Locale.ROOT);
         matches = 0;
@@ -259,8 +256,8 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     private Component detailStatus(Channel selected) {
         if (confirmingDelete) {
             return Component.literal("Delete " + selected.name() + "? This cannot be undone."
-                    + (selected.source() == null ? "" : " Unlinks terminal at " + selected.source().pos().toShortString()
-                    + " (" + selected.source().dimension().identifier() + ")."));
+                    + (selected.source() == null ? "" : " Unlinks terminal at " + ClientSourcePoses.describe(selected.source())
+                    + " (" + selected.source().dimension().location() + ")."));
         }
         return status(selected);
     }
@@ -268,12 +265,12 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     private int previewBottom() {
         Channel selected = selected();
         int lines = selected == null ? 2 : font.split(detailStatus(selected), detailWidth).size();
-        return Math.max(topPos + 66, topPos + panelHeight - Math.max(88, 60 + lines * font.lineHeight));
+        return Math.max(topPos + 66, topPos + imageHeight - Math.max(88, 60 + lines * font.lineHeight));
     }
 
     @Override
-    public void extractContents(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        InventoryPanels.panel(graphics, leftPos, topPos, panelWidth, panelHeight);
+    protected void renderBg(GuiGraphics graphics, float partialTick, int mouseX, int mouseY) {
+        InventoryPanels.panel(graphics, leftPos, topPos, imageWidth, imageHeight);
         Channel selected = selected();
         int previewTop = topPos + 38;
         int previewBottom = previewBottom();
@@ -282,23 +279,25 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
             boolean ready = preview != null && selected.source() != null && selected.source().equals(preview.source())
                     && ProjectionRenderManager.isReady(preview);
             if (ready) {
-                graphics.blit(RenderPipelines.GUI_OPAQUE_TEXTURED_BACKGROUND, preview.textureLocation(), detailX + 1, previewTop + 1,
-                        0.0F, 1.0F, detailWidth - 2, previewBottom - previewTop - 2, 1, -1, 1, 1);
+                int previewHeight = previewBottom - previewTop - 2;
+                RenderSystem.disableBlend();
+                graphics.blit(preview.textureLocation(), detailX + 1, previewTop + 1, 0, -previewHeight,
+                        detailWidth - 2, previewHeight, detailWidth - 2, -previewHeight);
+                RenderSystem.enableBlend();
             } else {
                 String message = selected.source() == null ? "No linked camera"
                         : preview != null && preview.isFailed() ? "Camera unavailable" : "Loading camera…";
-                graphics.centeredText(font, fit(message, detailWidth - 12),
-                        detailX + detailWidth / 2, (previewTop + previewBottom) / 2 - 4, 0xFFFFFFFF);
+                graphics.drawCenteredString(font, fit(message, detailWidth - 12),
+                        detailX + detailWidth / 2, (previewTop + previewBottom) / 2 - 4, 0xFFFFFF);
             }
             int textY = previewBottom + 8;
-            graphics.text(font, fit(selected.name(), detailWidth), detailX, textY, 0xFF404040, false);
-            graphics.textWithWordWrap(font, detailStatus(selected), detailX, textY + 14, detailWidth, confirmingDelete ? 0xFFA02020 : 0xFF404040, false);
+            graphics.drawString(font, fit(selected.name(), detailWidth), detailX, textY, 0x404040, false);
+            graphics.drawWordWrap(font, detailStatus(selected), detailX, textY + 14, detailWidth, confirmingDelete ? 0xFFA02020 : 0xFF404040);
         } else {
-            graphics.centeredText(font, "Select a channel", detailX + detailWidth / 2, (previewTop + previewBottom) / 2 - 4, 0xFFFFFFFF);
-            graphics.textWithWordWrap(font, Component.literal(manage ? "Select a channel to preview it, or search to create one."
-                    : "Select a channel to preview it."), detailX, previewBottom + 10, detailWidth, 0xFF404040, false);
+            graphics.drawCenteredString(font, "Select a channel", detailX + detailWidth / 2, (previewTop + previewBottom) / 2 - 4, 0xFFFFFF);
+            graphics.drawWordWrap(font, Component.literal(manage ? "Select a channel to preview it, or search to create one."
+                    : "Select a channel to preview it."), detailX, previewBottom + 10, detailWidth, 0x404040);
         }
-        super.extractContents(graphics, mouseX, mouseY, partialTick);
     }
 
     private String fit(String text, int availableWidth) {
@@ -306,26 +305,26 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
     }
 
     @Override
-    protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
-        graphics.text(font, title, 10, 12, 0xFF404040, false);
+    protected void renderLabels(GuiGraphics graphics, int mouseX, int mouseY) {
+        graphics.drawString(font, title, 10, 12, 0x404040, false);
         Channel current = current();
         String status = current == null ? "Not linked" : "Linked to " + current.name();
-        int right = panelWidth - (unlink != null && unlink.visible ? 72 : 10);
+        int right = imageWidth - (unlink != null && unlink.visible ? 72 : 10);
         status = fit(status, Math.max(0, right - font.width(title) - 30));
-        graphics.text(font, status, right - font.width(status), 12, 0xFF404040, false);
-        graphics.text(font, "Channels", 10, 63, 0xFF404040, false);
+        graphics.drawString(font, status, right - font.width(status), 12, 0x404040, false);
+        graphics.drawString(font, "Channels", 10, 63, 0x404040, false);
         String count = matches == channels.size() ? Integer.toString(channels.size()) : matches + " of " + channels.size();
-        graphics.text(font, count, listWidth - 10 - font.width(count), 63, 0xFF404040, false);
+        graphics.drawString(font, count, listWidth - 10 - font.width(count), 63, 0x404040, false);
     }
 
     @Override
-    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        super.render(graphics, mouseX, mouseY, partialTick);
+        renderTooltip(graphics, mouseX, mouseY);
     }
 
     @Override
-    public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-        int keyCode = event.key();
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
         if (keyCode == 256 && confirmingDelete) {
             confirmingDelete = false;
             updateActions();
@@ -341,9 +340,9 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
                 createChannel();
                 return true;
             }
-            return search.keyPressed(event) || search.canConsumeInput();
+            return search.keyPressed(keyCode, scanCode, modifiers) || search.canConsumeInput();
         }
-        return super.keyPressed(event);
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     private final class ChannelList extends ObjectSelectionList<ChannelRow> {
@@ -362,24 +361,24 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         }
 
         private void revealSelection() {
-            scrollToEntry(getSelected());
+            ensureVisible(getSelected());
         }
 
         @Override
-        protected void extractListBackground(GuiGraphicsExtractor graphics) {
+        protected void renderListBackground(GuiGraphics graphics) {
             InventoryPanels.inset(graphics, getX(), getY(), getWidth(), getHeight());
         }
 
         @Override
-        protected void extractListSeparators(GuiGraphicsExtractor graphics) {
+        protected void renderListSeparators(GuiGraphics graphics) {
             InventoryPanels.insetBorder(graphics, getX(), getY(), getWidth(), getHeight());
         }
 
         @Override
-        public void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-            super.extractWidgetRenderState(graphics, mouseX, mouseY, partialTick);
+        public void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+            super.renderWidget(graphics, mouseX, mouseY, partialTick);
             if (children().isEmpty()) {
-                graphics.textWithWordWrap(font, Component.literal("No matching channels"), getX() + 8, getY() + 8, getWidth() - 16, 0xFFFFFFFF);
+                graphics.drawWordWrap(font, Component.literal("No matching channels"), getX() + 8, getY() + 8, getWidth() - 16, 0xFFFFFF);
             }
         }
 
@@ -389,7 +388,7 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         }
 
         @Override
-        protected int scrollBarX() {
+        protected int getScrollbarPosition() {
             return getRight() - 6;
         }
 
@@ -421,26 +420,22 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         }
 
         @Override
-        public void extractContent(GuiGraphicsExtractor graphics, int mouseX, int mouseY, boolean hovered, float partialTick) {
-            int x = getContentX();
-            int y = getContentY();
-            int width = getContentWidth();
+        public void render(GuiGraphics graphics, int index, int y, int x, int width, int height, int mouseX, int mouseY, boolean hovered, float partialTick) {
             String status = rowStatus();
             String name = channel == null ? "+ Create \"" + createName + "\"" : channel.name();
             boolean atLimit = channel == null && channels.size() >= ChannelManagerPersistence.MAX_CHANNELS;
             String shown = fit(name, width - font.width(status) - 12);
-            graphics.text(font, shown, x + 3, y + 6, atLimit ? 0xFFB0B0B0 : 0xFFFFFFFF, true);
-            graphics.text(font, status, x + width - font.width(status) - 3, y + 6, 0xFFFFFFFF, true);
+            graphics.drawString(font, shown, x + 3, y + 6, atLimit ? 0xB0B0B0 : 0xFFFFFF, true);
+            graphics.drawString(font, status, x + width - font.width(status) - 3, y + 6, 0xFFFFFF, true);
             if (hovered && atLimit) {
-                graphics.setTooltipForNextFrame(Component.literal("Channel limit reached (" + ChannelManagerPersistence.MAX_CHANNELS + ")"), mouseX, mouseY);
+                setTooltipForNextRenderPass(Component.literal("Channel limit reached (" + ChannelManagerPersistence.MAX_CHANNELS + ")"));
             } else if (hovered && !shown.equals(name)) {
-                graphics.setTooltipForNextFrame(Component.literal(name), mouseX, mouseY);
+                setTooltipForNextRenderPass(Component.literal(name));
             }
         }
 
         @Override
-        public boolean mouseClicked(net.minecraft.client.input.MouseButtonEvent event, boolean doubleClick) {
-            int button = event.button();
+        public boolean mouseClicked(double mouseX, double mouseY, int button) {
             if (button != 0) {
                 return false;
             }
@@ -453,13 +448,12 @@ public abstract class ChannelScreen<M extends ChannelMenu> extends AbstractConta
         }
 
         @Override
-        public boolean keyPressed(net.minecraft.client.input.KeyEvent event) {
-        int keyCode = event.key();
+        public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
             if (channel == null && (keyCode == 257 || keyCode == 335 || keyCode == 32)) {
                 createChannel();
                 return true;
             }
-            return super.keyPressed(event);
+            return super.keyPressed(keyCode, scanCode, modifiers);
         }
 
         @Override

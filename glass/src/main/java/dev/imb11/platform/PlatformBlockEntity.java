@@ -33,14 +33,14 @@ public abstract class PlatformBlockEntity extends BlockEntity {
         super.onLoad();
         if (level instanceof ServerLevel serverLevel) {
             ChannelManagerPersistence.onBlockEntityLoad(this, serverLevel);
-        } else if (level != null && level.isClientSide()) {
+        } else if (level != null && level.isClientSide) {
             ClientHooks.loaded(this);
         }
     }
 
     @Override
     public void setRemoved() {
-        if (level != null && level.isClientSide()) {
+        if (level != null && level.isClientSide) {
             ClientHooks.unloaded(this);
         }
         super.setRemoved();
@@ -48,7 +48,7 @@ public abstract class PlatformBlockEntity extends BlockEntity {
 
     @Override
     public void onChunkUnloaded() {
-        if (level != null && level.isClientSide()) {
+        if (level != null && level.isClientSide) {
             ClientHooks.unloaded(this);
         }
         super.onChunkUnloaded();

@@ -4,6 +4,4 @@ import net.minecraft.core.BlockPos;
 
 public interface ProjectionRenderRegion {
     void glass$setHiddenTerrainBlock(BlockPos position);
-
-    boolean glass$isProjection();
 }

@@ -8,10 +8,10 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 
 public record C2SProjectorChannelChangedPacket(BlockPos pos, String channel) implements CustomPacketPayload {
-    public static final CustomPacketPayload.Type<C2SProjectorChannelChangedPacket> PACKET_ID = new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("glass", "projector_channel_changed"));
+    public static final CustomPacketPayload.Type<C2SProjectorChannelChangedPacket> PACKET_ID = new CustomPacketPayload.Type<>(ResourceLocation.fromNamespaceAndPath("glass", "projector_channel_changed"));
     public static final StreamCodec<RegistryFriendlyByteBuf, C2SProjectorChannelChangedPacket> PACKET_CODEC = StreamCodec.ofMember((value, buf) -> {
         buf.writeBlockPos(value.pos());
         buf.writeUtf(value.channel(), ChannelManagerPersistence.MAX_WIRE_CHANNEL_NAME_LENGTH);
@@ -27,7 +27,7 @@ public record C2SProjectorChannelChangedPacket(BlockPos pos, String channel) imp
             return;
         }
         String channel = ChannelManagerPersistence.canonicalChannelName(payload.channel());
-        var level = player.level();
+        var level = player.serverLevel();
         ChannelManagerPersistence manager = ChannelManagerPersistence.get(level);
         if (channel != null && manager.containsName(channel) && level.getBlockEntity(payload.pos()) instanceof ProjectorBlockEntity projector) {
             projector.setChannelFromServer(channel);

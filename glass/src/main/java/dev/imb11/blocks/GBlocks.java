@@ -8,18 +8,17 @@ import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.tags.TagKey;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockBehaviour;
 
 public class GBlocks {
-    public static final TagKey<Block> GLASS_BLOCKS = TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("c", "glass_blocks"));
-    public static final TerminalBlock TERMINAL = new TerminalBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.OBSIDIAN).setId(ResourceKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("glass", "terminal"))).noOcclusion());
-    public static final ProjectorBlock PROJECTOR = new ProjectorBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.BEACON).setId(ResourceKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("glass", "projector"))));
-    public static final RedstoneInfusedSandBlock REDSTONE_INFUSED_SAND = new RedstoneInfusedSandBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.SAND).setId(ResourceKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("glass", "redstone_infused_sand"))));
-    public static final PowerableGlassBlock POWERABLE_GLASS = new PowerableGlassBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.GLASS).setId(ResourceKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("glass", "powerable_glass"))));
+    public static final TagKey<Block> GLASS_BLOCKS = TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath("c", "glass_blocks"));
+    public static final TerminalBlock TERMINAL = new TerminalBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.OBSIDIAN).noOcclusion());
+    public static final ProjectorBlock PROJECTOR = new ProjectorBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.BEACON));
+    public static final RedstoneInfusedSandBlock REDSTONE_INFUSED_SAND = new RedstoneInfusedSandBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.SAND));
+    public static final PowerableGlassBlock POWERABLE_GLASS = new PowerableGlassBlock(BlockBehaviour.Properties.ofFullCopy(Blocks.GLASS));
 
     public static void registerBlocks() {
         register("terminal", TERMINAL);
@@ -29,16 +28,16 @@ public class GBlocks {
     }
 
     public static void registerBlockEntities() {
-        Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, Identifier.fromNamespaceAndPath("glass", "terminal_entity"), TerminalBlockEntity.BLOCK_ENTITY_TYPE);
-        Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, Identifier.fromNamespaceAndPath("glass", "projector_entity"), ProjectorBlockEntity.BLOCK_ENTITY_TYPE);
+        Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("glass", "terminal_entity"), TerminalBlockEntity.BLOCK_ENTITY_TYPE);
+        Registry.register(BuiltInRegistries.BLOCK_ENTITY_TYPE, ResourceLocation.fromNamespaceAndPath("glass", "projector_entity"), ProjectorBlockEntity.BLOCK_ENTITY_TYPE);
     }
 
     public static void registerMenus() {
-        Registry.register(BuiltInRegistries.MENU, Identifier.fromNamespaceAndPath("glass", "terminal_gui"), TerminalBlockGUI.SCREEN_HANDLER_TYPE);
-        Registry.register(BuiltInRegistries.MENU, Identifier.fromNamespaceAndPath("glass", "projector_gui"), ProjectorBlockGUI.SCREEN_HANDLER_TYPE);
+        Registry.register(BuiltInRegistries.MENU, ResourceLocation.fromNamespaceAndPath("glass", "terminal_gui"), TerminalBlockGUI.SCREEN_HANDLER_TYPE);
+        Registry.register(BuiltInRegistries.MENU, ResourceLocation.fromNamespaceAndPath("glass", "projector_gui"), ProjectorBlockGUI.SCREEN_HANDLER_TYPE);
     }
 
     private static <T extends Block> T register(String id, T block) {
-        return Registry.register(BuiltInRegistries.BLOCK, Identifier.fromNamespaceAndPath("glass", id), block);
+        return Registry.register(BuiltInRegistries.BLOCK, ResourceLocation.fromNamespaceAndPath("glass", id), block);
     }
 }

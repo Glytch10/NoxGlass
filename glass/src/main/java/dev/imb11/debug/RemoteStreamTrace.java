@@ -83,7 +83,7 @@ public final class RemoteStreamTrace {
         int missing = 0;
         int unlit = 0;
         for (ChunkPos pos : summary.pending()) {
-            LevelChunk chunk = level == null ? null : level.getChunkSource().getChunkNow(pos.x(), pos.z());
+            LevelChunk chunk = level == null ? null : level.getChunkSource().getChunkNow(pos.x, pos.z);
             if (chunk == null) {
                 missing++;
             } else if (!chunk.isLightCorrect()) {

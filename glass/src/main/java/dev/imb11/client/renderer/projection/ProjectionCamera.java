@@ -7,7 +7,10 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 public final class ProjectionCamera extends Camera {
-    private final Matrix4f projection = new Matrix4f();
+    private static final float NEAR_DISTANCE = 0.05F;
+    private float horizontalRadius = NEAR_DISTANCE;
+    private float verticalRadius = NEAR_DISTANCE;
+
     public void setPose(Vec3 position, Quaternionf pose) {
         Quaternionf normalizedPose = new Quaternionf(pose).normalize();
         Vector3f look = new Vector3f(0.0F, 0.0F, -1.0F).rotate(normalizedPose);
@@ -15,16 +18,15 @@ public final class ProjectionCamera extends Camera {
         float pitch = (float) Math.toDegrees(Math.asin(-Math.max(-1.0F, Math.min(1.0F, look.y))));
         setRotation(yaw, pitch);
         rotation().set(normalizedPose);
+        getLookVector().set(0.0F, 0.0F, -1.0F).rotate(normalizedPose);
+        getUpVector().set(0.0F, 1.0F, 0.0F).rotate(normalizedPose);
+        getLeftVector().set(-1.0F, 0.0F, 0.0F).rotate(normalizedPose);
         setPosition(position.x, position.y, position.z);
     }
 
     public void setProjection(Matrix4f projection) {
-        this.projection.set(projection);
-    }
-
-    @Override
-    public boolean isInitialized() {
-        return true;
+        horizontalRadius = NEAR_DISTANCE / Math.max(Math.abs(projection.m00()), 1.0E-4F);
+        verticalRadius = NEAR_DISTANCE / Math.max(Math.abs(projection.m11()), 1.0E-4F);
     }
 
     @Override
@@ -33,20 +35,10 @@ public final class ProjectionCamera extends Camera {
     }
 
     @Override
-    public net.minecraft.client.renderer.culling.Frustum getCullFrustum() {
-        var frustum = new net.minecraft.client.renderer.culling.Frustum(getViewRotationMatrix(new Matrix4f()), projection);
-        Vec3 position = position();
-        frustum.prepare(position.x, position.y, position.z);
-        return frustum;
-    }
-
-    @Override
-    public Matrix4f getViewRotationMatrix(Matrix4f dest) {
-        return dest.rotation(rotation().conjugate(new Quaternionf()));
-    }
-
-    @Override
-    public Matrix4f getViewRotationProjectionMatrix(Matrix4f dest) {
-        return dest.set(projection).mul(getViewRotationMatrix(new Matrix4f()));
+    public NearPlane getNearPlane() {
+        Vec3 center = new Vec3(getLookVector()).scale(NEAR_DISTANCE);
+        Vec3 horizontal = new Vec3(getLeftVector()).scale(horizontalRadius);
+        Vec3 vertical = new Vec3(getUpVector()).scale(verticalRadius);
+        return new NearPlane(center, horizontal, vertical);
     }
 }
